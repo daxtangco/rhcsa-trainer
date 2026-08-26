@@ -60,44 +60,79 @@ Established during design and treated as fixed:
 
 ### Source corpus (verified 2026-08-26)
 
-The Cert Guide, 944 pages, contains substantially more usable material than
-assumed during design:
+Two Cert Guide editions are available. Both contain substantially more usable
+material than was assumed during design.
 
-| Item | Count | Use |
+| Item | RHCSA 9 | RHCSA 10 |
 |---|---|---|
-| Chapters | 28, in 5 parts | Matches the supplied program table **exactly**, chapter for chapter |
-| End-of-Chapter Labs | 53 | Unguided "do this" prompts → convert directly to graded tasks |
-| Guided Exercises (`Exercise N-M`) | 108 | Step-by-step walkthroughs → primary source for `solutions/` scripts |
-| Practice exams | 4 (A, B, C, D) | Matches the four Practice Test rows in the table |
+| Pages | 944 | 990 |
+| Chapters | 28, in 5 parts | 27, in 5 parts |
+| End-of-Chapter Labs | 53 | 51 |
+| Guided Exercises (`Exercise N-M`) | 108 | 101 |
+| Practice exams | 4 (A–D) | 4 (A–D) |
+| Objective→chapter mapping table | p. 38 | p. 42 |
 
-The 108 guided exercises are the significant find: they contain canonical command
-sequences, which means `solutions/` files are largely transcription rather than
-authorship. This materially reduces the authoring cost that `solutions/` +
-`antisolutions/` would otherwise impose, and is the strongest mitigation for
-risk R5.
+**RHCSA 9 is the primary source** — it matches the supplied program table exactly,
+chapter for chapter, and matches the targeted exam version. RHCSA 10 is a
+secondary reference used to measure the version delta (see risk R2 above).
 
-Chapter 28 is a *theoretical* pre-assessment (knowledge questions, not tasks) and
-therefore produces no graded tasks. The four practice exams do.
+**Caveat on the RHCSA 10 edition:** it is an *Early Release* — unedited
+prepublication text. Its table of contents is reliable for structural questions,
+but its prose should not be treated as authoritative.
+
+**The 108 guided exercises are the significant find.** Labs are unguided
+("do this") and convert straight into graded task prompts. Exercises are
+step-by-step walkthroughs containing canonical command sequences, which means
+`solutions/` files are largely **transcription rather than authorship**. This
+materially reduces the authoring cost that `solutions/` + `antisolutions/` would
+otherwise impose, and is the strongest mitigation for risk R5.
+
+**Both editions carry a verbatim objective→chapter mapping table** ("Table 1,
+Coverage of RHCSA Objectives"). These render as images and do not extract as
+text, so transcription is visual. This is the authoritative source for
+`objectives.yaml` and removes the need to reconstruct the taxonomy from memory.
+
+RHCSA 9 Chapter 28 is a *theoretical* pre-assessment (knowledge questions, not
+tasks) and therefore produces no graded tasks. The four practice exams do.
 
 ### Assumption carrying material risk
 
 **The user will sit the RHEL 9 revision of EX200.**
 
-Red Hat's currently published EX200 objectives include Flatpak repository and
-package management, and promote "Manage software" to its own category. Neither
-appears in RHCSA 9 or in the Cert Guide. This indicates the live exam has been
-revised to RHEL 10, which also ships dnf5 — a graded objective whose behavior
-differs from RHEL 9's dnf4.
-
 This was raised during design and the user elected to target RHEL 9 and the
-book. That decision stands and drives this design.
+RHCSA 9 Cert Guide. That decision stands and drives this design.
+
+With both Cert Guide editions available, the RHEL 9 → 10 delta is now **measured
+rather than inferred** (term frequency across full text extraction, 2026-08-26):
+
+| Topic | RHCSA 9 | RHCSA 10 | Change |
+|---|---|---|---|
+| `podman` | 215 | 4 | **Containers objective removed** |
+| `container` | 265 | 17 | removed |
+| `Flatpak` | 0 | 57 | **added** |
+| `stratis` | 143 | 1 | **removed** |
+| `vdo` | 2 | 0 | already absent |
+| `autofs` | 28 | 61 | **expanded** |
+| `GPT` | 65 | 45 | retained |
+
+Structural confirmation: the RHCSA 10 book has **27 chapters, not 28**. Chapter
+26 "Managing Containers" is gone entirely, and Chapter 15 is retitled from
+"Managing Advanced Storage" to "Managing Logical Volumes" — consistent with
+Stratis and VDO removal.
+
+**Consequence, quantified.** Chapter 26 (containers) is a full chapter with 215
+`podman` references. Under RHEL 9 it is a graded objective; under RHEL 10 it is
+worthless. Conversely Flatpak has no RHCSA 9 coverage at all. The version
+question therefore governs roughly a chapter of study effort in each direction —
+a larger stake than was apparent when the decision was made.
 
 **Mitigation:** every `task.yaml` carries `rhel: 9`. The field is unused by the
-initial implementation. If the exam version turns out to be RHEL 10, version
-filtering becomes an additive change rather than a restructuring. The cost today
-is one line of YAML per task.
+initial implementation. If the version flips, container tasks are re-tagged
+`out-of-scope` and Flatpak tasks are authored from Red Hat documentation — an
+additive change, not a restructuring. Cost today: one line of YAML per task.
 
 **Trigger to revisit:** the moment an exam is booked and its version confirmed.
+This is the single highest-value unknown in the project.
 
 ---
 
@@ -644,8 +679,10 @@ under construction is a comfortable way to avoid studying.
   — 28 chapters matching the program table, 53 labs, 108 exercises, 4 practice
   exams. See §2 source corpus.
 - `objectives.yaml`: the full RHEL 9 EX200 objective taxonomy with stable IDs,
-  pinned from Red Hat's published RHEL 9 objective list and cross-referenced to
-  the Cert Guide's 28 chapters.
+  transcribed visually from the RHCSA 9 Cert Guide's objective→chapter mapping
+  table (p. 38), cross-checked against Red Hat's published RHEL 9 objective list.
+  Also transcribe the RHCSA 10 table (p. 42) into `objectives-rhel10.yaml` so the
+  R2 delta is enumerated rather than estimated.
 - Extract the 53 labs and 108 exercises to a structured intermediate file
   (`corpus/`) as raw input for task authoring.
 - VM build checklist and `provision.sh`; `golden` and `clean` snapshots.
