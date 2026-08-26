@@ -53,7 +53,31 @@ Established during design and treated as fixed:
   `/mnt/c/Program Files (x86)/VMware/VMware Workstation/vmrun.exe`
 - `vmware-vdiskmanager.exe` present at the same path
 - Existing VMs: `Ubuntu 64-bit`, `Windows 11 x64`. No RHEL ISO yet.
-- **Not installed:** `docker`, `podman`, `qemu`, `virsh`, `poppler-utils`
+- **Not installed:** `docker`, `podman`, `qemu`, `virsh`
+- `poppler` 26.01.0 installed **rootless** at `~/.local/opt/poppler` with wrappers
+  in `~/.local/bin` (`sudo` cannot authenticate from a non-TTY context;
+  `apt-get download` + `dpkg -x` of 20 packages sidesteps it entirely)
+
+### Source corpus (verified 2026-08-26)
+
+The Cert Guide, 944 pages, contains substantially more usable material than
+assumed during design:
+
+| Item | Count | Use |
+|---|---|---|
+| Chapters | 28, in 5 parts | Matches the supplied program table **exactly**, chapter for chapter |
+| End-of-Chapter Labs | 53 | Unguided "do this" prompts → convert directly to graded tasks |
+| Guided Exercises (`Exercise N-M`) | 108 | Step-by-step walkthroughs → primary source for `solutions/` scripts |
+| Practice exams | 4 (A, B, C, D) | Matches the four Practice Test rows in the table |
+
+The 108 guided exercises are the significant find: they contain canonical command
+sequences, which means `solutions/` files are largely transcription rather than
+authorship. This materially reduces the authoring cost that `solutions/` +
+`antisolutions/` would otherwise impose, and is the strongest mitigation for
+risk R5.
+
+Chapter 28 is a *theoretical* pre-assessment (knowledge questions, not tasks) and
+therefore produces no graded tasks. The four practice exams do.
 
 ### Assumption carrying material risk
 
@@ -524,9 +548,9 @@ than all being saved for the end:
 
 | Test | Role |
 |---|---|
-| 1 | **Diagnostic baseline, taken before study begins.** Expected to go badly; that is the point. Calibrates the readiness model against reality on day one and identifies chapters that can be moved through quickly |
-| 2, 3 | Mid-program checkpoints |
-| 4 | **Sealed holdout.** Not opened until the readiness report claims readiness |
+| Practice Exam A | **Diagnostic baseline, taken before study begins.** Expected to go badly; that is the point. Calibrates the readiness model against reality on day one and identifies chapters that can be moved through quickly |
+| Practice Exams B, C | Mid-program checkpoints |
+| Practice Exam D | **Sealed holdout.** Not opened, and not mined for tasks, until the readiness report claims readiness |
 
 Reserving all four for the end discards four tests' worth of calibration.
 
@@ -616,11 +640,14 @@ real graded practice begins on day one rather than in week three — a study too
 under construction is a comfortable way to avoid studying.
 
 **Phase 0 — Foundations**
+- ~~Install poppler and confirm the Cert Guide's structure~~ **done 2026-08-26**
+  — 28 chapters matching the program table, 53 labs, 108 exercises, 4 practice
+  exams. See §2 source corpus.
 - `objectives.yaml`: the full RHEL 9 EX200 objective taxonomy with stable IDs,
   pinned from Red Hat's published RHEL 9 objective list and cross-referenced to
   the Cert Guide's 28 chapters.
-- Install `poppler-utils` and mine the Cert Guide for chapter structure and
-  end-of-chapter labs.
+- Extract the 53 labs and 108 exercises to a structured intermediate file
+  (`corpus/`) as raw input for task authoring.
 - VM build checklist and `provision.sh`; `golden` and `clean` snapshots.
 - Verify WSL2 → VMnet8 reachability (risk R1).
 
@@ -662,7 +689,7 @@ reboot check, end to end.
 | R2 | Exam is actually the RHEL 10 revision | ~10–15% of the bank is stale; Flatpak entirely absent; dnf5 differences | `rhel: 9` field present from day one makes version filtering additive. Revisit on booking |
 | R3 | Host memory pressure (15 GB total) | Sluggish VM or WSL | Cap WSL at 4 GB via `.wslconfig`; VM at 4 GB |
 | R4 | Graders over-fitted to one solution | Trains brittle habits | Multiple `solutions/` required per task; enforced by `validate` |
-| R5 | Task-bank authoring becomes procrastination | No actual studying happens | Phase 1 exit criterion is a working graded lab. Authoring is paced alongside chapter study, not front-loaded |
+| R5 | Task-bank authoring becomes procrastination | No actual studying happens | Phase 1 exit criterion is a working graded lab. Authoring is paced alongside chapter study, not front-loaded. The book's 108 guided exercises supply canonical command sequences, so `solutions/` files are largely transcription |
 | R6 | `open-vm-tools` down in boot-level labs | Neither transport available | Expected and handled: the app directs the user to the VMware console and offers a revert |
 
 ---
