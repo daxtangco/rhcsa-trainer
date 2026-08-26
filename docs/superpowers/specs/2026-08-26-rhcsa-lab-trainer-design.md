@@ -93,14 +93,21 @@ Two Cert Guide editions are available. Both are **reference material to be mined
 |---|---|---|
 | Pages | 944 | 990 |
 | Chapters | 28, in 5 parts | 27, in 5 parts |
-| Unique labs (`Lab N.M`) | 32 | 33 |
+| Unique labs (`Lab N.M`) | 30 | 28 |
 | Unique exercises (`Exercise N-M`) | 95 | 85 |
 | Practice exams | 4 (A–D) | 4 (A–D) |
 | Objective→chapter mapping table | p. 38 | p. 42 |
 
-Chapters 1–25 align 1:1. RHCSA 9 Ch 26 (containers) has no RHCSA 10 counterpart;
-Ch 15 drops from 2 labs to 1 (Stratis removed). RHCSA 10 nonetheless has more
-labs overall, having added Flatpak and expanded autofs.
+Chapters 1–25 align 1:1. The lab delta is **exactly −2**, and both absent labs are
+precisely the removed content: RHCSA 9's `Lab 15.2` (Stratis) and `Lab 26.1`
+(containers). Every other lab ID appears in both editions. This is independent
+structural confirmation of the term-frequency delta measured below.
+
+Exercise IDs also overlap heavily: **84 appear in both editions**, 11 are RHCSA 9
+only, 1 is RHCSA 10 only — 96 distinct slots, 180 total instances. Those 84
+overlapping IDs are the corpus's single most valuable asset (§14.4). Caveat:
+1:1 chapter alignment makes a shared ID a strong signal of a shared topic, not a
+guarantee of identical content; each pair is confirmed at transcription time.
 
 **RHCSA 9 is primary** — it matches the program table and the targeted exam
 version. RHCSA 10 is exploited four ways (§14.4).
@@ -114,8 +121,8 @@ source material fails loudly against a real VM rather than propagating silently.
 
 | Source | Becomes |
 |---|---|
-| End-of-chapter labs (65 across editions) | Graded task prompts |
-| Guided exercises (180 across editions) | Guided-mode walkthroughs **and** `solutions/` sources |
+| End-of-chapter labs (58 instances, 30 slots) | Graded task prompts |
+| Guided exercises (180 instances, 96 slots) | Guided-mode walkthroughs **and** `solutions/` sources |
 | Chapter prose | Compressed into concept cards (§6.1) |
 | Objective→chapter tables | `objectives.yaml` |
 | Practice exams (8 across editions) | Mock exams, incl. two sealed holdouts |
@@ -497,8 +504,14 @@ which is strictly better data than a hint counter: it distinguishes *"needed
 orientation"* from *"did not have the concept"* from *"could not assemble the
 commands."* Those are three different deficits with three different remedies.
 
-Rungs 4 and 5 are **unavailable in mock exam mode**. Rung 3 is available in
-practice mode only.
+Rung availability is per mode:
+
+| Mode | Max rung | Reason |
+|---|---|---|
+| Guided | n/a | Guided mode *is* full disclosure by construction |
+| Practice | 5 | Learning mode; getting unstuck matters more than the score |
+| Drill | 3 | Concept cards stay available — a forgotten concept is exactly what drill exists to catch — but assembling the commands must be unaided, or the recall being tested is not happening |
+| Mock exam | 2 | The real exam offers orientation from `man` and nothing else |
 
 ### 7.1 Post-attempt teaching is mandatory
 
@@ -577,8 +590,8 @@ propagating.
 
 ### 9.1 Modes
 
-**Guided** — first contact with an objective. Sourced from the 180 guided
-exercises across both editions. The app shows a command, **the user types it**
+**Guided** — first contact with an objective. Sourced from the 180 guided exercise
+instances across both editions. The app shows a command, **the user types it**
 (typing, not clicking — muscle memory is the point), and each step is verified
 before advancing. The unguided lab follows days later via drill.
 
@@ -784,6 +797,7 @@ Lab 014                    6:12   * VM: clean
    var  rhel 2.00g         | rung 1 of 5
  [root@labvm ~]# _         | [Grade]  ^G
                            | [Hint]   ^H
+                           | [Reset]  ^R
 ----------------------------------------------
 ```
 
@@ -916,7 +930,9 @@ material. Four uses:
    once during Phase 0 corpus extraction.
 2. **The other edition's exercise becomes an additional `solutions/` file.**
    Second paths become authoritative transcriptions rather than inventions,
-   directly strengthening the anti-over-fitting mechanism of §8.
+   directly strengthening the anti-over-fitting mechanism of §8. The **84
+   exercise IDs present in both editions** (§2) are the supply, and they are why
+   the multiple-solutions requirement of §8 is affordable rather than aspirational.
 3. **Eight practice exams**, enabling two sealed holdouts (§13).
 4. **Dual labs for high-weight objectives only.** Doubling every task doubles
    authoring for no benefit on low-weight material. Applied selectively where
@@ -965,8 +981,9 @@ under construction is a comfortable way to avoid studying.
   transcribed visually from the RHCSA 9 mapping table (p. 38), cross-checked
   against Red Hat's published RHEL 9 list. Also transcribe the RHCSA 10 table
   (p. 42) into `objectives-rhel10.yaml` so the R2 delta is enumerated.
-- Extract the 65 labs and 180 exercises to `corpus/` as structured raw input,
-  tagged by edition — this also produces the §14.4 weight signal.
+- Extract the 58 lab instances and 180 exercise instances to `corpus/` as
+  structured raw input, tagged by edition and keyed by ID so the 84 cross-edition
+  exercise pairs are linked — this also produces the §14.4 weight signal.
 - VM build checklist and `provision.sh`; `golden` and `clean` snapshots.
 - Verify WSL2 → VMnet8 reachability (risk R1).
 
