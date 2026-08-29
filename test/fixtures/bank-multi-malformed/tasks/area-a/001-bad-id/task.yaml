@@ -1,0 +1,11 @@
+id: BadID
+title: Broken task A
+chapter: 6
+scope: exam-objective
+rhel: 9
+objectives: [users.local.create]
+difficulty: 1
+time_budget: 120
+weight: medium
+prompt: |
+  Do something.

@@ -1,0 +1,10 @@
+id: area-b/002-bad-objectives
+title: Broken task B
+chapter: 6
+scope: exam-objective
+rhel: 9
+difficulty: 1
+time_budget: 120
+weight: medium
+prompt: |
+  Do something else.
