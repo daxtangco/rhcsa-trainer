@@ -6,7 +6,7 @@
 
 **Architecture:** A TypeScript library (`src/engine/`) with no HTTP awareness, wrapped by a thin CLI and a Hono server. Content is files on disk (YAML + Markdown + Bash); only user history would go in SQLite (deferred to Phase 2). The engine talks to the VM exclusively through the `LabTransport` interface, which has three implementations: `FakeTransport` (in-memory, for tests), `SshTransport` (primary), and `VmrunTransport` (fallback). Graders are Bash scripts emitting JSONL, so they are language-agnostic and testable in isolation.
 
-**Tech Stack:** Node 22.23.2 (native TypeScript stripping, no build step), Vitest, Hono, `js-yaml`, `gray-matter`, `ws`, `node-pty`, Vite + React + Tailwind, `xterm.js`. Bash 5.3 for graders and provisioning.
+**Tech Stack:** Node 22.23.2 (native TypeScript stripping, no build step), Vitest, Hono, `js-yaml`, `gray-matter`, `ws`, Vite + React + Tailwind, `xterm.js`. Bash 5.3 for graders and provisioning.
 
 **Spec:** `docs/superpowers/specs/2026-08-26-rhcsa-lab-trainer-design.md`
 
@@ -20,7 +20,7 @@ Every task's requirements implicitly include this section.
 - **Erasable syntax only.** Node's type stripping cannot handle TypeScript constructs that emit runtime code. **Never write** `enum`, `namespace`, parameter properties (`constructor(private readonly x: T)`), or `experimentalDecorators`. Use `const` objects with `as const` plus union types instead of `enum`, and explicit field declarations plus assignments in constructors. `tsconfig.json` sets `erasableSyntaxOnly: true` so violations fail typecheck rather than surfacing at runtime.
 - **Relative imports carry the `.ts` extension** (`import { x } from './y.ts'`). Required by Node's ESM resolver. `tsconfig.json` sets `allowImportingTsExtensions: true`.
 - **ESM only.** `package.json` has `"type": "module"`. No `require`.
-- **`sudo` cannot authenticate in this environment — there is no TTY.** Never write a task step that needs root on the WSL host. Guest-side root is fine: the transports already run as root inside the VM. Host-side tooling installs rootless into `~/.local` (this is how `poppler` 26.01.0 was installed).
+- **`sudo` cannot authenticate in this environment — there is no TTY.** Never write a task step that needs root on the WSL host. Guest-side root is fine, but it is *arranged*, not free: both transports connect as `student`, and `guest-provision.sh` installs `/etc/sudoers.d/rhcsa-trainer` granting `student` passwordless `sudo`. Every guest-side script — `setup.sh`, `grade.sh`, solutions, anti-solutions — therefore calls `sudo` explicitly and non-interactively. A guest-side script that assumes it is already root is a bug. Host-side tooling installs rootless into `~/.local` (this is how `poppler` 26.01.0 was installed).
 - **Target exam version is RHEL 9.** Every `task.yaml` and concept front matter carries `rhel: 9`. Do not add RHEL 10 content in these phases.
 - **SELinux stays `enforcing` in the VM.** Never disable or permissive it to make a task pass.
 - **Graders are read-only and their exit code is ignored** (spec §6.5). A grader that repairs state, or that aborts on first failure, is a defect.
@@ -49,7 +49,7 @@ Tasks 1–14 and 23–24 are unblocked and can be built today. Tasks 17, 18 and 
 rhcsa-trainer/
 ├── package.json                        deps + scripts, ESM, no build step
 ├── tsconfig.json                       strict, erasableSyntaxOnly, noEmit
-├── vitest.config.ts                    test roots; test/vm/** needs RHCSA_VM=1
+├── vitest.config.ts                    test roots; `test/**/*.vm.test.ts` needs `RHCSA_VM=1`
 ├── vite.config.ts                      T24: react, tailwind, /api + /ws proxy
 ├── index.html                          T24: the single page
 ├── README.md                           T15 + T25: build the VM, then run it
@@ -64,7 +64,8 @@ rhcsa-trainer/
 ├── scripts/
 │   ├── extract-corpus.ts               T14: PDFs → corpus/*.json
 │   ├── r1-probe.sh                     T16: answers risk R1
-│   └── provision.sh                    T19: idempotent guest setup
+│   ├── provision.sh                    T19: idempotent guest setup
+│   └── guest-provision.sh              T19: runs *inside* the guest; everything `provision.sh` cannot do over vmrun
 ├── corpus/                             T14 output; git-ignored, regenerable
 ├── content/
 │   ├── objectives.yaml                 T13: RHEL 9 EX200 taxonomy
@@ -72,7 +73,7 @@ rhcsa-trainer/
 │   ├── lib/assert.sh                   T20: checkpoint emitters + helpers
 │   ├── concepts/**/*.md                T21/T22: front matter + prose
 │   └── tasks/<area>/<nnn>-<slug>/      T21/T22
-│       ├── task.yaml  setup.sh  grade.sh  explanation.md
+│       ├── task.yaml  setup.sh  grade.sh
 │       ├── solutions/*.sh              ≥2, independent correct paths
 │       └── antisolutions/*.sh          wrong-but-plausible, declare failures
 └── src/
@@ -89,6 +90,8 @@ rhcsa-trainer/
     │   ├── disclosure/
     │   │   ├── ladder.ts               T9: rungs, caps, deriveRating
     │   │   └── content.ts              T23: rungContent + commandSketch
+    │   ├── exam/
+    │   │   └── limits.ts               T9: EX200 duration + passing score (UNCONFIRMED)
     │   ├── validate/
     │   │   ├── expectations.ts         T10: antisolution header parser
     │   │   ├── harness.ts              T11: one task's fixture matrix
@@ -96,7 +99,7 @@ rhcsa-trainer/
     │   └── vm/
     │       ├── transport.ts            T2: LabTransport interface
     │       ├── fake.ts                 T2: FakeTransport
-    │       ├── config.ts               T17: VmConfig + loadVmConfig; sshArgs T23
+    │       ├── config.ts               T17: VmConfig + loadVmConfig
     │       ├── vmrun.ts                T17: VmrunTransport + VmController
     │       ├── ssh.ts                  T18: SshTransport
     │       └── select.ts               T18: chooseTransport + NoTransportError
@@ -117,6 +120,7 @@ rhcsa-trainer/
 test/
 ├── …                                   mirrors src/, runs with no VM
 ├── fixtures/                            hand-written banks and task dirs
+├── validate/run.test.ts                 T21: validateBank over the real bank
 ├── web/                                 jsdom, via environmentMatchGlobs
 ├── vm/                                  transports against fakes (T17, T18)
 └── vm/*.vm.test.ts                      needs a live VM: RHCSA_VM=1 (T25)
@@ -165,8 +169,8 @@ describe('scaffold', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/daxtangco/rhcsa-trainer && npx vitest run`
-Expected: FAIL — vitest is not installed (`npx` will either error or prompt). This confirms there is no toolchain yet.
+Run: `cd /home/daxtangco/rhcsa-trainer && npx --no vitest run`
+Expected: FAIL — the command exits non-zero because vitest is not installed locally yet. `--no` is what keeps it a red probe: without it `npx` would offer to fetch vitest from the registry and the step could pass by accident. This confirms there is no toolchain yet.
 
 - [ ] **Step 3: Write the scaffold**
 
@@ -197,6 +201,8 @@ Expected: FAIL — vitest is not installed (`npx` will either error or prompt). 
   }
 }
 ```
+
+`engines.node` is `>=22.18.0`, not the installed 22.23.2: 22.18.0 is where `--experimental-strip-types` became the default, which is the real floor. Do not raise it to match the Global Constraint.
 
 `tsconfig.json`:
 
@@ -229,12 +235,20 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
+    // Registers Vitest's global `afterEach`, which is the only thing that lets
+    // @testing-library/react install its automatic DOM cleanup. Without it the
+    // component tests of Task 24 accumulate mounted trees and `getByText`
+    // starts throwing on duplicate matches. Set here, in Task 1, so the two
+    // copies of this file cannot drift.
+    globals: true,
     include: ['test/**/*.test.ts'],
     // A suite that needs a live hypervisor is named *.vm.test.ts and opts in
     // via RHCSA_VM=1, so the default `npm test` runs anywhere. The gate is on
     // the filename, not the directory: test/vm/ also holds unit tests that
-    // drive vmrun and ssh through fakes, and those must always run.
-    exclude: process.env.RHCSA_VM === '1' ? [] : ['test/**/*.vm.test.ts'],
+    // drive vmrun and ssh through fakes, and those must always run. Both arms
+    // restate node_modules and dist, because naming `exclude` at all replaces
+    // Vitest's defaults rather than adding to them.
+    exclude: process.env.RHCSA_VM === '1' ? ['**/node_modules/**', '**/dist/**'] : ['**/node_modules/**', '**/dist/**', 'test/**/*.vm.test.ts'],
     testTimeout: 10_000,
   },
 })
@@ -259,9 +273,11 @@ This proves the Global Constraint is enforced by the compiler rather than by dis
 Run:
 ```bash
 cd /home/daxtangco/rhcsa-trainer
+mkdir -p src
 printf 'export enum Bad { A }\n' > src/_guard.ts
 npm run typecheck; echo "exit=$?"
 rm src/_guard.ts
+rmdir src 2>/dev/null || true
 ```
 Expected: typecheck FAILS citing `erasableSyntaxOnly` on the `enum`, then `exit=2`. If it exits 0, the TypeScript version is too old — raise it to `^5.8.0` and repeat.
 
@@ -290,7 +306,7 @@ This task is what decouples the entire engine from the missing ISO. It comes sec
 
 **Files:**
 - Create: `src/engine/vm/transport.ts`, `src/engine/vm/fake.ts`, `src/engine/content/errors.ts`
-- Test: `test/vm/fake.test.ts` → **no**, this must run without a VM: `test/fake-transport.test.ts`
+- Test: `test/fake-transport.test.ts`
 
 **Interfaces:**
 - Consumes: nothing.
@@ -324,7 +340,7 @@ describe('FakeTransport', () => {
     expect(t.calls).toEqual(['lvs --noheadings'])
   })
 
-  it('defaults a handler-omitted stream to empty and code to 0', async () => {
+  it("returns the handler's result unchanged", async () => {
     const t = new FakeTransport(() => ({ stdout: 'ok', stderr: '', code: 0 }))
     await expect(t.exec('true')).resolves.toEqual({ stdout: 'ok', stderr: '', code: 0 })
   })
@@ -598,7 +614,7 @@ describe('loadTask', () => {
     expect(problems).toMatch(/reboot_check/)
     expect(problems).toMatch(/transport/)
     expect(problems).toMatch(/prompt/)
-    // 11 distinct problems, all surfaced from one load.
+    // at least 11 of the 12 problems this fixture contains, all surfaced from one load.
     expect((err as ContentError).problems.length).toBeGreaterThanOrEqual(11)
   })
 
@@ -799,7 +815,7 @@ GIT_AUTHOR_NAME=daxtangco GIT_AUTHOR_EMAIL=daxtangco@localhost \
 GIT_COMMITTER_NAME=daxtangco GIT_COMMITTER_EMAIL=daxtangco@localhost \
 git commit -m "feat(content): add TaskSpec loader with aggregating validation
 
-requires_disks is capped at 3 because the VM has exactly three spare disks,
+requires_disks is capped at 3 because the VM has two spare disks,
 so a higher value is unsatisfiable rather than merely unusual."
 ```
 
@@ -1875,7 +1891,7 @@ export function checkCoverage(bank: Bank): CoverageReport {
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npm test && npm run typecheck`
-Expected: 8 new tests PASS; typecheck clean.
+Expected: 9 new tests PASS; typecheck clean.
 
 - [ ] **Step 6: Commit**
 
@@ -2206,8 +2222,8 @@ about the user's work, not an exception."
 ### Task 9: Disclosure ladder and FSRS rating
 
 **Files:**
-- Create: `src/engine/disclosure/ladder.ts`
-- Test: `test/disclosure/ladder.test.ts`
+- Create: `src/engine/disclosure/ladder.ts`, `src/engine/exam/limits.ts`
+- Test: `test/disclosure/ladder.test.ts`, `test/exam/limits.test.ts`
 
 **Interfaces:**
 - Consumes: nothing.
@@ -2222,6 +2238,7 @@ about the user's work, not an exception."
   - `type Rating = 'again' | 'hard' | 'good' | 'easy'`
   - `interface RatingInput { rungUsed: Rung; passed: boolean; anyPassed: boolean; durationS: number; timeBudgetS: number; hadRegression: boolean }`
   - `function deriveRating(i: RatingInput): Rating`
+  - `const EXAM_DURATION_MINUTES`, `const EXAM_TOTAL_SCORE`, `const EXAM_PASSING_SCORE` from `src/engine/exam/limits.ts`
 
 **Design note.** `LadderMode` excludes `guided` on purpose. Spec §7 marks guided mode's max rung "n/a" because guided mode *is* full disclosure by construction, so the type system refuses to represent a ladder in guided mode rather than encoding it as a magic number.
 
@@ -2417,18 +2434,51 @@ export function deriveRating(i: RatingInput): Rating {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Record the exam parameters in one place**
+
+Spec §16 lists the EX200 duration and passing score as Phase 0 deliverables and §13.2 consumes them, but nothing in Phase 1 enforces them. They still need an owner, and this is the only mode-aware module in Phase 1 — it already encodes the per-mode rung caps — so the constants live beside it. The values are an open Phase-0 blocker for the user to confirm, which is why the comment says so and why there is exactly one file to correct.
+
+`src/engine/exam/limits.ts`:
+
+```ts
+/**
+ * EX200 exam parameters. UNCONFIRMED — Phase 0 blocker: verify against the
+ * current Red Hat exam objectives page before Phase 2 builds exam mode.
+ * Nothing in Phase 1 enforces these; they exist so there is exactly one
+ * place to correct.
+ */
+export const EXAM_DURATION_MINUTES = 150
+export const EXAM_TOTAL_SCORE = 300
+export const EXAM_PASSING_SCORE = 210
+```
+
+`test/exam/limits.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest'
+import { EXAM_PASSING_SCORE, EXAM_TOTAL_SCORE } from '../../src/engine/exam/limits.ts'
+
+describe('exam limits', () => {
+  it('keeps the passing score at 70% of the total', () => {
+    // The ratio is the invariant worth pinning: it is what survives if Red Hat
+    // rescales the exam, whereas either number alone does not.
+    expect(EXAM_PASSING_SCORE / EXAM_TOTAL_SCORE).toBe(0.7)
+  })
+})
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npm test && npm run typecheck`
-Expected: 14 new tests PASS; typecheck clean.
+Expected: 16 new tests PASS; typecheck clean.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 cd /home/daxtangco/rhcsa-trainer
 GIT_AUTHOR_NAME=daxtangco GIT_AUTHOR_EMAIL=daxtangco@localhost \
 GIT_COMMITTER_NAME=daxtangco GIT_COMMITTER_EMAIL=daxtangco@localhost \
-git add src/engine/disclosure test/disclosure && \
+git add src/engine/disclosure src/engine/exam test/disclosure test/exam && \
 GIT_AUTHOR_NAME=daxtangco GIT_AUTHOR_EMAIL=daxtangco@localhost \
 GIT_COMMITTER_NAME=daxtangco GIT_COMMITTER_EMAIL=daxtangco@localhost \
 git commit -m "feat(disclosure): add the five-rung ladder and derived FSRS rating
@@ -2749,7 +2799,7 @@ silently."
 - Test: `test/validate/harness.test.ts`
 
 **Interfaces:**
-- Consumes: `TaskSpec` (T3), `LabTransport` (T2), `grade`/`GradeResult` (T8), `parseExpectations`/`expectedStatus` (T10), `ContentError` (T2), `statusById` (T5).
+- Consumes: `TaskSpec` (T3), `LabTransport` (T2), `grade`/`GradeResult` (T8), `parseExpectations`/`expectedStatus` (T10), `statusById` (T5).
 - Produces:
   - `type FixtureKind = 'none' | 'solution' | 'antisolution'`
   - `interface Fixture { kind: FixtureKind; name: string; script: string }`
@@ -2811,13 +2861,17 @@ function world() {
       state.rebooted = false
       return { stdout: '', stderr: '', code: 0 }
     }
+    // Non-exclusive, and deliberately so: the correct solution is the single
+    // script 'GROW\nPERSIST\n', so an if/return chain would set `grown` and
+    // return before it ever noticed the PERSIST line.
     if (script.includes('GROW')) {
       state.grown = true
       state.mounted = true
-      return { stdout: '', stderr: '', code: 0 }
     }
     if (script.includes('PERSIST')) {
       state.persisted = true
+    }
+    if (script.includes('GROW') || script.includes('PERSIST')) {
       return { stdout: '', stderr: '', code: 0 }
     }
     if (script.includes('GRADE')) {
@@ -2925,10 +2979,20 @@ describe('validateTask', () => {
   it('accepts an invariant checkpoint that passes at baseline', async () => {
     // var-from-lv is a "do not break this" check, not a goal. Requiring it to
     // fail before the student starts would make every honest task unvalidatable.
+    // Asserted the distinguishing way, so this is not a restatement of the
+    // headline test: name var-from-lv in the *pre-reboot* baseline and the
+    // harness must object to that id and only that id — which is the same
+    // statement as "var-from-lv passes in verdict A while lv-var-size fails
+    // there, exactly as declared".
     const w = world()
-    const results = await validateTask(task(), scripts(), deps(w))
+    const s = scripts({
+      grade: '# baseline-fail: lv-var-size, persist-config, var-from-lv\nGRADE',
+    })
+    const results = await validateTask(task(), s, deps(w))
     const none = results.find((r) => r.kind === 'none')
-    expect(none?.failures).toEqual([])
+    const text = none?.failures.join('\n') ?? ''
+    expect(text).toMatch(/verdict A var-from-lv: expected fail, got pass/)
+    expect(text).not.toMatch(/lv-var-size/)
   })
 
   it('fails a task whose grade.sh declares no baseline', async () => {
@@ -3092,7 +3156,7 @@ import type { TaskSpec } from '../content/task.ts'
 import { grade } from '../grading/grader.ts'
 import { duplicateIds, statusById, type Verdict } from '../grading/verdict.ts'
 import type { LabTransport } from '../vm/transport.ts'
-import { expectedStatus, parseExpectations } from './expectations.ts'
+import { expectedStatus, parseExpectations, type ExpectedFailure } from './expectations.ts'
 
 export type FixtureKind = 'none' | 'solution' | 'antisolution'
 
@@ -3183,10 +3247,6 @@ function checkVerdict(
   expect: (id: string) => 'pass' | 'fail',
   failures: string[],
 ): void {
-  const dupes = duplicateIds(verdict)
-  if (dupes.length > 0) {
-    failures.push(`grader emitted duplicate checkpoint ids: ${dupes.join(', ')}`)
-  }
   if (verdict.checkpoints.length === 0) {
     failures.push(`verdict ${label}: grader emitted no checkpoints`)
   }
@@ -3222,7 +3282,7 @@ async function runFixture(
       }
     }
 
-    if (!task.rebootCheck && declared.some((d) => d.phase === 'post' || d.phase === 'both')) {
+    if (!task.rebootCheck && declared.some((d) => d.phase === 'post')) {
       const ids = declared
         .filter((d) => d.phase === 'post')
         .map((d) => d.id)
@@ -3256,6 +3316,14 @@ async function runFixture(
 
   if (result.rebootError !== undefined) {
     failures.push(`reboot failed: ${result.rebootError}`)
+  }
+
+  // Once, against verdict A only. Duplicate ids are a property of the grader,
+  // not of a particular run, so checking inside checkVerdict would report the
+  // same duplicate twice on any task with reboot_check: true.
+  const dupes = duplicateIds(result.verdictA)
+  if (dupes.length > 0) {
+    failures.push(`grader emitted duplicate checkpoint ids: ${dupes.join(', ')}`)
   }
 
   if (fixture.kind === 'none') {
@@ -3318,11 +3386,16 @@ export async function validateTask(
   const results: FixtureResult[] = []
 
   const gate = inventoryGate(task, scripts)
-  if (!gate.ok) results.push(gate)
 
+  // The fixture results come first and the gate last. Ordering matters: every
+  // test that indexes `results[0]` means "the first fixture", and pushing the
+  // gate ahead of the loop would silently retarget those assertions at the
+  // inventory check instead.
   for (const fixture of scripts.fixtures) {
     results.push(await runFixture(task, scripts, fixture, deps))
   }
+
+  if (!gate.ok) results.push(gate)
 
   return results
 }
@@ -4023,7 +4096,7 @@ The cross-edition figure is 28 shared labs + 84 shared exercises. **If the lab o
 Spot-check one extracted body:
 ```bash
 cd /home/daxtangco/rhcsa-trainer
-node -e "const l=require('./corpus/r9/labs.json'); const x=l.find(i=>i.id==='Lab 15.1'); console.log(x.text.slice(0,400))"
+node --input-type=module -e "const l = JSON.parse(await (await import('node:fs/promises')).readFile('corpus/r9/labs.json','utf8')); console.log(l.find(i=>i.id==='Lab 15.1').text.slice(0,400))"
 ```
 Expected: the real end-of-chapter lab text, not a one-line table-of-contents entry.
 
@@ -4214,6 +4287,13 @@ Log in as `student` at the console.
    ip -4 addr show scope global
    ```
 
+5. Run `scripts/guest-provision.sh` (Task 19) **from the VM console, not over
+   ssh**; it will ask for `student`'s password once and never again. Its first
+   act is to install `/etc/sudoers.d/rhcsa-trainer`, and after that every
+   `sudo` in the guest — including every grader, setup script and solution the
+   app runs — needs no password. The console is the only place that first
+   prompt can be answered, which is why this step is not automated.
+
 ## 4. Verify from the WSL host
 
 In WSL:
@@ -4255,7 +4335,12 @@ Write the values you used into `.env.local` at the repo root (git-ignored):
 RHCSA_VMX=C:\VMs\rhcsa-lab\rhcsa-lab.vmx
 RHCSA_VM_IP=192.168.x.y
 RHCSA_SSH_USER=student
+RHCSA_GUEST_PASSWORD=<student's password>
 ```
+
+Before running `provision.sh`, put `RHCSA_VMX` and `RHCSA_GUEST_PASSWORD` in
+`.env.local` at the repo root. Nothing else in this project needs credentials,
+and your Red Hat account password must not go in any file in this repo.
 
 ## Done
 
@@ -4500,12 +4585,13 @@ The fallback transport and the snapshot machinery. `runProgramInGuest` works wit
 **Files:**
 - Create: `src/engine/vm/vmrun.ts`
 - Create: `src/engine/vm/config.ts`
-- Test: `test/vm/vmrun.test.ts`
+- Test: `test/vm/config.test.ts`, `test/vm/vmrun.test.ts`
 
 **Interfaces:**
 - Consumes: `LabTransport`, `ExecResult`, `TransportKind` (T2).
 - Produces:
   - `interface VmConfig { vmx: string; ip?: string; sshUser: string; sshPort: number; sshKey: string; vmrun: string; forceTransport?: TransportKind }`
+  - `interface VmrunConfigSlice` — the exported subset of `VmConfig` that `VmrunTransport` and `VmController` actually read. Task 18 must satisfy it structurally.
   - `function loadVmConfig(env: Record<string, string | undefined>): VmConfig`
   - `type Runner = (exe: string, args: string[]) => Promise<ExecResult>` — the single injection seam; the real one wraps `execFile`
   - `class VmrunTransport implements LabTransport` — `kind = 'vmrun'`
@@ -4615,11 +4701,12 @@ describe('VmrunTransport', () => {
 
     expect(r.calls[0]?.[0]).toBe('copyFileFromHostToGuest')
     expect(r.calls[0]?.[1]).toBe(CFG.vmx)
-    // guest destination is under /tmp and unique per exec
-    expect(r.calls[0]?.[3]).toMatch(/^\/tmp\/rhcsa-[a-z0-9]+\.sh$/)
+    // guest destination is under /tmp and unique per exec. Asserted from the
+    // end of argv, not index 3: the guest auth flags sit in between, so the
+    // fixed index would land on the username.
+    expect(r.calls[0]?.at(-1)).toMatch(/^\/tmp\/rhcsa-[a-z0-9]+\.sh$/)
 
     expect(r.calls[1]?.[0]).toBe('runProgramInGuest')
-    expect(r.calls[1]).toContain('-noWait=false')
     expect(r.calls[1]).toContain('/usr/bin/bash')
   })
 
@@ -4894,9 +4981,10 @@ export class VmrunTransport implements LabTransport {
         'runProgramInGuest',
         this.#cfg.vmx,
         ...auth,
-        '-noWait=false',
-        '-activeWindow=false',
-        '-interactive=false',
+        // No -noWait / -activeWindow / -interactive: those are bare presence
+        // flags, not `=false` assignments, and blocking until the guest program
+        // exits is already vmrun's default. Passing them as `flag=false` is a
+        // syntax error, not a no-op.
         '/usr/bin/bash',
         guestPath,
       ])
@@ -5079,7 +5167,7 @@ The primary transport, plus the selector that makes the dual control plane autom
 - Test: `test/vm/ssh.test.ts`, `test/vm/select.test.ts`
 
 **Interfaces:**
-- Consumes: `LabTransport`, `ExecResult` (T2); `VmConfig`, `Runner`, `VmrunTransport`, `realRunner` (T17).
+- Consumes: `LabTransport`, `ExecResult` (T2); `VmConfig`, `VmrunTransport` (T17). Note it does **not** consume `Runner` or `realRunner`: `ssh.ts` spawns `ssh` itself and `select.ts` imports neither.
 - Produces:
   - `class SshTransport implements LabTransport` — `kind = 'ssh'`
   - `class NoTransportError extends Error`
@@ -5089,6 +5177,7 @@ The primary transport, plus the selector that makes the dual control plane autom
 **Design notes.**
 - The script goes to `ssh` on **stdin**, not as an argv argument. Quoting a multi-line bash script through argv is the classic source of grading bugs where a `$` or a newline changes meaning.
 - SSH options are pinned: `BatchMode=yes` (never prompt — a hung prompt looks like a hung grader), `StrictHostKeyChecking=accept-new`, and a dedicated `UserKnownHostsFile` so reverting snapshots does not trip host-key warnings on the user's real `known_hosts`.
+- **`BatchMode=yes` is correct rather than accidentally correct, and it stays.** With `/etc/sudoers.d/rhcsa-trainer` in place (see the Global Constraints and Task 19), the guest never has a legitimate reason to prompt for anything. So any password prompt means the drop-in is missing, and `BatchMode` turns that into a fast, clean, diagnosable failure instead of a hang that looks like a slow grader.
 - `chooseTransport` probes with a **3 s** ceiling. A task can pin `require: 'vmrun'` — that is how fault-injection tasks stay gradeable after they break networking.
 
 - [ ] **Step 1: Write the failing SSH test**
@@ -5213,7 +5302,7 @@ const CFG: VmConfig = {
 
 /** A stand-in whose availability is fixed at construction. */
 function stub(kind: 'ssh' | 'vmrun', available: boolean) {
-  const t = new FakeTransport()
+  const t = new FakeTransport(() => ({ stdout: '', stderr: '', code: 0 }))
   return Object.assign(t, {
     kind,
     isAvailable: async () => available,
@@ -5470,7 +5559,7 @@ export async function chooseTransport(
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npm test && npm run typecheck`
-Expected: 10 ssh tests + 7 select tests PASS; typecheck clean.
+Expected: 9 ssh tests + 7 select tests PASS; typecheck clean.
 
 - [ ] **Step 7: ACCEPTANCE (deferred until the VM exists)**
 
@@ -5534,10 +5623,11 @@ Everything the checklist did not do by hand. Runs once, idempotently, from WSL.
 **Files:**
 - Create: `scripts/provision.sh`
 - Create: `scripts/guest-provision.sh` (the part that runs inside the VM)
+- Create: `.env.local` — a commented template, written only if absent, git-ignored and never committed
 
 **Interfaces:**
 - Consumes: `.env.local` (T15 §6); `vmrun.exe`.
-- Produces: the `clean` **live** snapshot every task reset reverts to; the SSH key at `~/.ssh/rhcsa_lab`; the ISO-backed local `dnf` repo; **zero spare disks** attached.
+- Produces: the `clean` **live** snapshot every task reset reverts to; the SSH key at `~/.ssh/rhcsa_lab`; the ISO-backed local `dnf` repo; `/etc/sudoers.d/rhcsa-trainer`, which is what makes every guest-side `sudo` in the whole project non-interactive; **zero spare disks** attached.
 
 **Blocked on:** the VM existing.
 
@@ -5546,6 +5636,7 @@ Everything the checklist did not do by hand. Runs once, idempotently, from WSL.
 - The local repo is ISO-backed and **copied into the VM's own disk**, not a host mount. A host-mounted ISO disappears if the `.vmx` CD-ROM device is detached, and then every `dnf` in every task fails.
 - `clean` is captured **with memory, while running** — that is what makes resets ~5 s.
 - The script never handles Red Hat credentials. `subscription-manager` is not run at all.
+- **Passwordless `sudo` is arranged here, and nothing in the project works without it.** Both transports connect as `student`, and every grader, setup script, solution and anti-solution calls `sudo` on a connection with no TTY. RHEL 9's default `%wheel ALL=(ALL) ALL` would prompt, and since the script itself arrives on ssh's stdin the prompt would consume the rest of it — so correct student work would grade as failure on every task in the bank. Enabling root SSH was rejected in Task 15 for good reason, and there is no way to answer a `sudo` prompt when the script *is* stdin. A NOPASSWD drop-in for one unprivileged account in a disposable local lab VM is the standard arrangement, and it is also what the real exam gives you: on the RHCSA you get the root password, not a sudo prompt to fight.
 
 - [ ] **Step 1: Write `scripts/guest-provision.sh`**
 
@@ -5560,6 +5651,19 @@ This runs inside the VM. It is delivered over the transport, so it must be idemp
 set -euo pipefail
 
 log() { printf '[guest] %s\n' "$*"; }
+
+# --------------------------------------------------------- 0. sudo, no TTY
+# Everything after this point — and every grader, setup script and solution the
+# app will ever run — reaches root through sudo with no TTY to answer a prompt.
+# RHEL 9's default %wheel rule asks for a password, and because our scripts
+# arrive on ssh's stdin, sudo's prompt would eat the rest of the script and the
+# failure would look like a broken grader. So: install the rule, validate it,
+# and prove it works before continuing.
+printf 'student ALL=(ALL) NOPASSWD: ALL\n' | sudo tee /etc/sudoers.d/rhcsa-trainer >/dev/null
+sudo chmod 0440 /etc/sudoers.d/rhcsa-trainer
+sudo visudo -cf /etc/sudoers.d/rhcsa-trainer   # a malformed drop-in can lock out sudo entirely
+sudo -n true || { echo "FATAL: passwordless sudo is not in effect for student" >&2; exit 1; }
+log "passwordless sudo installed and verified"
 
 # ---------------------------------------------------------------- ssh key
 PUBKEY=${RHCSA_PUBKEY:?RHCSA_PUBKEY must be passed in}
@@ -5651,6 +5755,8 @@ lsblk -no NAME,SIZE,TYPE
 log "guest provisioning complete"
 ```
 
+The bootstrap sequencing is the one subtlety. This script's *own* `sudo` calls still need a password the first time, because the drop-in it installs does not exist yet. That is why Task 15's checklist tells the user to run it once from the VM console, where a password prompt is answerable. Every run after that — including every run `provision.sh` drives over `vmrun` — is silent.
+
 - [ ] **Step 2: Write `scripts/provision.sh`**
 
 ```bash
@@ -5665,11 +5771,38 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# ------------------------------------------------------------------ 0. env
+# Nothing earlier in the plan can create .env.local usefully: RHCSA_VM_IP is
+# discovered by provisioning, and RHCSA_VMX and RHCSA_GUEST_PASSWORD are known
+# only to the user. So this is the first place with a real value to write, and
+# it writes a commented template with every key present and only the discovered
+# ones filled. The `:?` guards below then name exactly what is still missing.
+if [[ ! -f .env.local ]]; then
+  cat > .env.local <<'EOF'
+# Local lab configuration. Git-ignored. Never commit this file.
+#
+# Only you can supply these two - see docs/vm-build-checklist.md:
+RHCSA_VMX=
+RHCSA_GUEST_PASSWORD=
+#
+# Discovered by scripts/provision.sh; leave blank and it will fill this in:
+RHCSA_VM_IP=
+#
+# Optional overrides; the defaults are usually right:
+RHCSA_SSH_USER=student
+#RHCSA_SSH_PORT=22
+#RHCSA_SSH_KEY=
+#RHCSA_TRANSPORT=
+#RHCSA_ISO=
+EOF
+  echo "wrote a template .env.local - fill in RHCSA_VMX and RHCSA_GUEST_PASSWORD, then re-run"
+fi
+
 # shellcheck disable=SC1091
 [[ -f .env.local ]] && set -a && . ./.env.local && set +a
 
 : "${RHCSA_VMX:?set RHCSA_VMX in .env.local - see docs/vm-build-checklist.md}"
-: "${RHCSA_GUEST_PASSWORD:?export RHCSA_GUEST_PASSWORD (the student password) for this run}"
+: "${RHCSA_GUEST_PASSWORD:?set RHCSA_GUEST_PASSWORD (the student password) in .env.local - see docs/vm-build-checklist.md}"
 VMRUN=${RHCSA_VMRUN:-'/mnt/c/Program Files (x86)/VMware/VMware Workstation/vmrun.exe'}
 SSH_USER=${RHCSA_SSH_USER:-student}
 KEY=${RHCSA_SSH_KEY:-$HOME/.ssh/rhcsa_lab}
@@ -5704,12 +5837,12 @@ log "spare disks: none by design (Phase 1)"
 log "local repo payload"
 if [[ -f $ISO ]]; then
   # ~10 GB, so only copy it once.
-  if guest runProgramInGuest -noWait=false /usr/bin/test -f /var/lib/rhcsa-dvd.iso 2>/dev/null; then
+  if guest runProgramInGuest /usr/bin/test -f /var/lib/rhcsa-dvd.iso 2>/dev/null; then
     echo "guest already has /var/lib/rhcsa-dvd.iso"
   else
     echo "copying $ISO into the guest (this takes several minutes)"
     guest copyFileFromHostToGuest "$ISO" /tmp/rhcsa-dvd.iso
-    guest runProgramInGuest -noWait=false /usr/bin/bash -c \
+    guest runProgramInGuest /usr/bin/bash -c \
       "sudo mv /tmp/rhcsa-dvd.iso /var/lib/rhcsa-dvd.iso && sudo chmod 0444 /var/lib/rhcsa-dvd.iso"
   fi
 else
@@ -5720,7 +5853,7 @@ fi
 # ---------------------------------------------------------------- 5. guest
 log "guest provisioning"
 guest copyFileFromHostToGuest scripts/guest-provision.sh /tmp/guest-provision.sh
-guest runProgramInGuest -noWait=false /usr/bin/bash -c \
+guest runProgramInGuest /usr/bin/bash -c \
   "RHCSA_PUBKEY='$PUBKEY' bash /tmp/guest-provision.sh"
 guest deleteFileInGuest /tmp/guest-provision.sh || true
 
@@ -5782,7 +5915,7 @@ Expected: `syntax ok`.
 
 Run: `cd /home/daxtangco/rhcsa-trainer && bash scripts/provision.sh; echo "exit=$?"`
 
-Expected: it stops at the first missing variable with the message naming `.env.local` and `docs/vm-build-checklist.md` — not a bash error, and **not** a half-provisioned VM.
+There are two outcomes and both are correct, so know which one you are looking at. If `.env.local` is **absent**, the script writes the template, prints `wrote a template .env.local`, and then stops at `set RHCSA_VMX in .env.local`. If `.env.local` is **present** but the password is blank — the common case, because Task 15 §6 tells the user to fill in the paths — it gets past `RHCSA_VMX` and stops at `set RHCSA_GUEST_PASSWORD (the student password) in .env.local` instead. Either way it stops at the *first* missing variable with a message naming `.env.local` and `docs/vm-build-checklist.md` — not a bash error, and **not** a half-provisioned VM.
 
 - [ ] **Step 5: ACCEPTANCE (deferred until the VM exists)**
 
@@ -5792,11 +5925,15 @@ read -rsp 'student password: ' RHCSA_GUEST_PASSWORD && export RHCSA_GUEST_PASSWO
 bash scripts/provision.sh
 ```
 
-Then verify the three things that matter, in order:
+Then verify the things that matter, in order. **Check 0 first** — if it fails, nothing else is worth measuring:
 
 ```bash
 VMRUN='/mnt/c/Program Files (x86)/VMware/VMware Workstation/vmrun.exe'
 VMX=$(grep '^RHCSA_VMX=' .env.local | cut -d= -f2-)
+IP=$(grep '^RHCSA_VM_IP=' .env.local | cut -d= -f2-)
+
+# 0. Passwordless sudo is in effect. This must print exactly 0.
+ssh student@"$IP" -o BatchMode=yes sudo -n id -u
 
 # 1. A revert round-trip is fast and lands on a working machine.
 time "$VMRUN" revertToSnapshot "$VMX" clean
@@ -5812,7 +5949,9 @@ ssh -i ~/.ssh/rhcsa_lab student@... 'sudo dnf -y install tree && which tree'
 ssh -i ~/.ssh/rhcsa_lab student@... 'df -h /home /var; sudo lvs'
 ```
 
-Expected: the revert completes in roughly 5 seconds; `Enforcing`; `/dev/mapper/rhel-var`; non-zero `vg_free`; `tree` installs with no network; `/home` at 8 G and `/var` at 2 G.
+Expected: check 0 prints `0`; the revert completes in roughly 5 seconds; `Enforcing`; `/dev/mapper/rhel-var`; non-zero `vg_free`; `tree` installs with no network; `/home` at 8 G and `/var` at 2 G.
+
+**If check 0 prints anything other than `0`, stop.** The sudoers drop-in is missing or malformed, and no grader in the bank will work until it is fixed — every guest-side script calls `sudo` on a connection with no TTY, so a prompt there does not fail cleanly, it silently eats the rest of the script. Re-run `guest-provision.sh` from the VM console and watch its `passwordless sudo installed and verified` line.
 
 **If the revert takes 30 s or more, the snapshot was captured powered-off.** Power the VM on, wait for it to settle, and re-run the snapshot step — this is worth fixing, because it is the difference between 15 and 40 attempted tasks in an evening.
 
@@ -5855,7 +5994,7 @@ Every grader sources this. It is the contract between bash and the JSONL parser 
   - `is_persistent PATH` — fstab **or** a systemd mount unit
   - Each emitted line is one JSON object, exactly what `parseVerdict` consumes.
 
-**Scope note.** Eight helpers, not thirty. Only what the five Phase 1 tasks need. Adding a helper no grader calls means shipping untested code into the one component whose correctness the whole app rests on.
+**Scope note.** Ten helpers, not thirty. Only what the five Phase 1 tasks need. Adding a helper no grader calls means shipping untested code into the one component whose correctness the whole app rests on.
 
 **Design notes.**
 - `to_bytes` uses `awk`, not bash arithmetic, because `1.5G` is a real thing a student will type into `lvextend` and bash cannot multiply floats.
@@ -5910,7 +6049,7 @@ describe('checkpoint emitters', () => {
 
   it('escapes quotes, backslashes, tabs and newlines so one bad path cannot corrupt the verdict', async () => {
     const v = parseVerdict(
-      await sh(`ck_fail weird 'says "hi"' 'back\\\\slash and	tab'`),
+      await sh(`ck_fail weird 'says "hi"' 'back\\slash and	tab'`),
     )
     expect(v.noise).toEqual([])
     expect(v.checkpoints[0]?.desc).toBe('says "hi"')
@@ -6203,7 +6342,7 @@ is_persistent() {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npx vitest run test/lib/assert.test.ts`
-Expected: all ~24 tests PASS. `to_bytes`, `within_pct`, `is_persistent` and the escaping tests need no VM — they run against real bash on the WSL host.
+Expected: all 26 tests PASS. `to_bytes`, `within_pct`, `is_persistent` and the escaping tests need no VM — they run against real bash on the WSL host.
 
 `lv_size_bytes` and `mount_source` are not unit-tested here: they need `sudo lvs` and a real mount. They are covered by Task 21's fixture matrix, which runs against the VM.
 
@@ -6239,7 +6378,7 @@ GIT_AUTHOR_NAME=daxtangco GIT_AUTHOR_EMAIL=daxtangco@localhost \
 GIT_COMMITTER_NAME=daxtangco GIT_COMMITTER_EMAIL=daxtangco@localhost \
 git commit -m "feat(content): grader helper library
 
-Eight helpers, only what the Phase 1 tasks need. Tested by shelling out to
+Ten helpers, only what the Phase 1 tasks need. Tested by shelling out to
 real bash, so the JSONL that bash emits is checked against the parser that
 consumes it rather than against an assumption. within_pct exists because an
 exact size comparison fails a correct answer: XFS metadata means a 4 GiB LV
@@ -6268,8 +6407,9 @@ The Phase 1 exit criterion runs through this directory. Everything before it was
 - Create: `content/tasks/storage/014-grow-home-lv/antisolutions/03-wrong-lv.sh`
 - Create: `content/concepts/storage/lvm-abstraction-stack.md`
 - Create: `content/concepts/storage/why-xfs-cannot-shrink.md`
+- Create: `src/engine/validate/run.ts` (`validateBank` over many tasks)
 - Modify: `src/cli/index.ts` (add the `validate` command deferred from Task 12)
-- Test: `test/cli/validate.test.ts`
+- Test: `test/validate/run.test.ts`
 
 **Interfaces:**
 - Consumes: everything. `loadBank` (T7), `loadTaskScripts`/`validateTask` (T11), `chooseTransport` (T18), `VmController` (T17), `assert.sh` (T20), the objective ids from T13.
@@ -6404,7 +6544,11 @@ fs_bytes=$(fs_size_bytes /home 2>/dev/null || echo 0)
 if [[ $home_on_lv == no ]]; then
   ck_fail fs-home-size "the filesystem on /home is at least 12 GiB" \
     "/home is not mounted from rhel/home (source: ${home_src:-none})"
-elif [[ ${fs_bytes:-0} -ge $TARGET ]]; then
+# within_pct first, exact second. A 12 GiB XFS filesystem never reports 12 GiB
+# usable — df shows space after metadata — so a bare `-ge $TARGET` fails both
+# correct solutions and makes `6/6 fixtures ok` unreachable. This is exactly
+# what within_pct exists for.
+elif within_pct "${fs_bytes:-0}" "$TARGET" 2 || [[ ${fs_bytes:-0} -ge $TARGET ]]; then
   ck_pass fs-home-size "the filesystem on /home is at least 12 GiB"
 else
   ck_fail fs-home-size "the filesystem on /home is at least 12 GiB" \
@@ -6533,7 +6677,9 @@ These are the reason the app can replace the book. The card is what the user rea
 
 `content/concepts/storage/lvm-abstraction-stack.md`:
 
-```markdown
+Six backticks on this block, not three: the card itself contains a fenced code block, and a three-backtick outer fence would end at the inner one instead of at the end of the card.
+
+``````markdown
 ---
 id: storage.lvm-abstraction-stack
 title: Physical volumes, volume groups, logical volumes
@@ -6576,7 +6722,7 @@ Three commands are worth reaching for before anything else: `lsblk` to see the
 shape of the storage, `lvs` to see what LVM thinks the sizes are, and `df -h`
 to see what the filesystems think. When `lvs` and `df` disagree, you already
 know what went wrong.
-```
+``````
 
 `content/concepts/storage/why-xfs-cannot-shrink.md`:
 
@@ -7015,7 +7161,7 @@ fails the moment a grader over-fits to one command or one fstab string."
 ### Task 22: Four more tasks — users, SELinux, systemd, troubleshooting
 
 **Files:**
-- Create: `content/tasks/users/006-team-provisioning/` (`task.yaml`, `setup.sh`, `grade.sh`, 2 solutions, 3 antisolutions)
+- Create: `content/tasks/users/006-team-provisioning/` (`task.yaml`, `setup.sh`, `grade.sh`, 3 solutions, 2 antisolutions — `03-primary-group-only.sh` is a correct answer and therefore a solution, so this directory still contributes 6 fixtures and the `18/18` arithmetic is unchanged)
 - Create: `content/tasks/selinux/019-httpd-alt-port/` (same shape)
 - Create: `content/tasks/systemd/017-boot-time-service/` (same shape)
 - Create: `content/tasks/troubleshooting/028-restore-remote-access/` (same shape)
@@ -7151,12 +7297,16 @@ ck student-intact "the student account is untouched and still in wheel" $?
 exit 0
 ```
 
-**Every `ck` call must have a literal id.** No loops, no `"${var}-suffix"`. The
-count of `ck` call sites in `grade.sh` is what the Lab screen shows as the
-masked checkpoint total *before* the student has been graded, and Task 23's
-`countCheckpoints` derives it by static inspection. A generated id makes that
-number wrong, and a wrong count is worse than no count. A helper function is
-the right way to avoid the repetition, as above.
+**Every checkpoint id is written as a literal in the grader — never a variable,
+never interpolated — so the masked total can be derived without running
+anything.** No loops, no `"${var}-suffix"`. That total is what the Lab screen
+shows *before* the student has been graded, and Task 23's `countCheckpoints`
+derives it by static inspection over `ck`, `ck_pass`, `ck_fail` and `ck_skip`.
+Emitting one id from several branches is normal and does not change the total:
+the count is of distinct ids, not of call sites, which is exactly what an
+`if`/`else` pair reporting the same checkpoint two ways requires. A generated id
+is what breaks it, and a wrong count is worse than no count. A helper function
+is the right way to avoid the repetition, as above.
 
 `solutions/01-useradd-usermod-chage.sh`:
 
@@ -7200,7 +7350,14 @@ sudo visudo -c -f /tmp/sudoers.new
 sudo install -m 0440 -o root -g root /tmp/sudoers.new /etc/sudoers
 ```
 
-`antisolutions/01-primary-group-only.sh`:
+`solutions/03-primary-group-only.sh`:
+
+This one is a **solution**, not an anti-solution, and the distinction is the
+whole point of it. It makes `devops` each user's *primary* group instead of a
+secondary one, and everything passes — so it belongs in `solutions/`, where the
+harness requires every checkpoint to pass, rather than in `antisolutions/`,
+where a missing `# expect-fail:` header is a fatal parse error and where the
+file would be asserting the opposite of what it demonstrates.
 
 ```bash
 #!/usr/bin/env bash
@@ -7208,9 +7365,9 @@ sudo install -m 0440 -o root -g root /tmp/sudoers.new /etc/sudoers
 # one. Everything passes, which is the point: this is a correct answer that a
 # naive grader might reject, so it is here to prove the grader accepts it.
 #
-# Nothing is declared: id -nG lists primary groups too. If validate reports a
-# failure here, the membership checkpoints are testing the mechanism rather
-# than the end state - fix the grader, not this file.
+# A third genuinely independent path: id -nG lists primary groups too. If
+# validate reports a failure here, the membership checkpoints are testing the
+# mechanism rather than the end state - fix the grader, not this file.
 set -euo pipefail
 sudo groupadd -g 5000 devops
 sudo useradd -g devops alice
@@ -7833,7 +7990,11 @@ ck sshd-listening "something is listening on TCP 22" $?
 # --permanent covers both verdicts: if it is in the permanent config it is in
 # the runtime config after the reboot, and the runtime check below would be
 # redundant with sshd-listening before it.
-sudo firewall-cmd --permanent --list-all 2>/dev/null | grep -qw ssh
+# Both spellings count. --add-service=ssh and --add-port=22/tcp are equally
+# correct answers, and spec 6.5 rule 1 forbids grading the mechanism, so
+# accepting only the named service would fail a correct solution.
+perm=$(sudo firewall-cmd --permanent --list-all 2>/dev/null)
+grep -qw ssh <<<"$perm" || grep -qw 22/tcp <<<"$perm"
 ck firewall-ssh "the firewall permits ssh permanently" $?
 
 conn=$(cat /etc/rhcsa-conn 2>/dev/null)
@@ -7865,19 +8026,22 @@ sudo nmcli connection modify "$(cat /etc/rhcsa-conn)" connection.autoconnect yes
 # Independent in all three fixes: the firewall gets the port rather than the
 # named service, autoconnect is set by editing the keyfile and reloading rather
 # than through nmcli, and sshd is enabled and started as two operations.
-# --add-port=22/tcp is a correct way to permit ssh and would be rejected by a
-# grader that greps firewall-cmd --list-services, which is why the checkpoint
-# uses --list-all.
+# --add-port=22/tcp is a correct way to permit ssh, and this file adds *only*
+# the port - not the named service as well - so its independence from solution
+# 01 is real. The checkpoint accepts either spelling out of --list-all.
 set -euo pipefail
 sudo systemctl enable sshd
 sudo systemctl start sshd
 
 sudo firewall-cmd --permanent --add-port=22/tcp
-sudo firewall-cmd --permanent --add-service=ssh
 sudo firewall-cmd --reload
 
 conn=$(cat /etc/rhcsa-conn)
-file=$(sudo nmcli -g FILENAME connection show "$conn")
+# NAME,FILENAME in list mode, then pick the row out with awk. FILENAME is a
+# list-mode field: the profile-mode form of `connection show` takes
+# <setting>.<property> and cannot return it, so `-g FILENAME connection show
+# "$conn"` fails - and under `set -euo pipefail` that aborts the whole script.
+file=$(sudo nmcli -g NAME,FILENAME connection show | awk -F: -v c="$conn" '$1==c{print $2; exit}')
 sudo sed -i '/^autoconnect=/d' "$file"
 sudo sed -i "/^\[connection\]/a autoconnect=true" "$file"
 sudo nmcli connection reload
@@ -8376,7 +8540,7 @@ Then, for each of the four new tasks, confirm no fixture declares a checkpoint t
 ```bash
 cd /home/daxtangco/rhcsa-trainer
 for T in content/tasks/*/*; do
-  emitted=$(grep -oE '^[[:space:]]*ck [a-z0-9][a-z0-9-]*' "$T/grade.sh" | awk '{print $2}' | sort -u)
+  emitted=$(grep -oE '^[[:space:]]*ck(_pass|_fail|_skip)? [a-z0-9][a-z0-9-]*' "$T/grade.sh" | awk '{print $NF}' | sort -u)
   declared=$(grep -hoE '^# (expect|baseline)-fail:.*' "$T/grade.sh" "$T"/antisolutions/*.sh 2>/dev/null \
     | sed 's/^# [a-z]*-fail://' | tr ',' '\n' | sed 's/@.*//' | tr -d ' ' | sort -u)
   missing=$(comm -13 <(echo "$emitted") <(echo "$declared"))
@@ -8384,7 +8548,7 @@ for T in content/tasks/*/*; do
 done
 echo "id cross-check complete"
 ```
-Expected: no `UNDECLARED-ID` lines. This works only because every `ck` call has a literal id — the same property `countCheckpoints` relies on in Task 23.
+Expected: no `UNDECLARED-ID` lines. The alternation matters: the graders reach for `ck_pass`, `ck_fail` and `ck_skip` as often as bare `ck`, and a pattern that matched only `ck ` would call a genuinely undeclared id clean. This works only because every emitter's id is a literal — the same property `countCheckpoints` relies on in Task 23.
 
 - [ ] **Step 9: ACCEPTANCE — validate the three SSH tasks**
 
@@ -8485,26 +8649,23 @@ Eight concept cards, one per mechanism the four tasks depend on."
   - `interface GradeReport { passed; total; allPassed; rebooted; rebootError?; regressionCount; checkpoints?; regressions? }`
   - `function countCheckpoints(gradeScript: string): number`
   - `function reportFor(mode: SessionMode, result: GradeResult, revealed: boolean): GradeReport`
-  - `class SessionStore` with `create` / `get` / `list` / `advanceRung` / `record` / `finish`
-  - `interface LabRuntime { transportKind; reset; runSetup; gradeTask }`
+  - `class SessionStore` with `create` / `get` / `list` / `advanceRung` / `restart` / `record` / `finish`
+  - `interface LabRuntime { transportKind: TransportKind; reset(): Promise<void>; exec(script: string): Promise<ExecResult> }`
   - `interface AppDeps` / `function createApp(deps: AppDeps): Hono`
   - `interface PtyLike` / `function attachTerminal(server, deps): WebSocketServer`
 
-- [ ] **Step 1: Install the server dependencies and find out whether a real PTY is available**
+- [ ] **Step 1: Install the server dependencies**
 
 Run:
 ```bash
 cd /home/daxtangco/rhcsa-trainer
 npm install hono @hono/node-server ws
 npm install -D @types/ws
-npm install node-pty || echo "NODE_PTY_UNAVAILABLE"
 ```
 
-`node-pty` is a native module and needs `python3`, `make` and a C++ compiler. **`sudo` cannot authenticate in this environment**, so if the toolchain is missing it cannot be installed and `node-pty` will fail to build. That is expected and planned for: `terminal.ts` below is written against a `PtyLike` interface with two implementations, and the pipe implementation has no native dependency at all.
+There is one terminal implementation and it is `spawnSshPipe`: a plain pipe to `ssh -tt`. No native module, no compiler, nothing to detect at install time. The remote side still gets a real terminal — `ssh -tt` forces one — so `vim`, `less` and `nmtui` all work; what is lost is live resizing, so the terminal is fixed to the size negotiated at connect time.
 
-Record which one applies:
-- If the install succeeded, `src/server/terminal.ts` uses `spawnSshPty`. Resizing works, because a local PTY forwards window-size changes to `sshd`.
-- If it printed `NODE_PTY_UNAVAILABLE`, remove any partial install with `npm remove node-pty` and use `spawnSshPipe`. The remote side still gets a real terminal (`ssh -tt` forces one), so `vim`, `less` and `nmtui` all work; what is lost is live resizing, so the terminal is fixed to the size negotiated at connect time.
+`terminal.ts` is still written against a small `PtyLike` interface, because that is what makes `bridge()` testable with a fake instead of a subprocess, and it is the seam a later phase would use if resizing ever becomes worth a native dependency. It is not a fork in the road for Phase 1.
 
 **A fixed-size terminal is an acceptable Phase 1 answer, and arguably the right one** — the exam gives you the console you are given. Do not spend time trying to work around a missing compiler.
 
@@ -8825,6 +8986,28 @@ ck lv-home-size "the home LV is at least 12 GiB" $?
 exit 0
 `
 
+// The shape Task 21's real grader has: no bare `ck` anywhere, and `lv-home-size`
+// emitted from both arms of an if/else. Five call sites, three ids. A count of
+// call sites would say five and the UI would mask two checkpoints that do not
+// exist, so the fixture has to look like the thing being counted.
+const GRADE_BRANCHED = `#!/usr/bin/env bash
+set -uo pipefail
+
+if within_pct "$\{lv_bytes:-0}" "$TARGET" 2; then
+  ck_pass lv-home-size "the home LV is at least 12 GiB"
+else
+  ck_fail lv-home-size "the home LV is at least 12 GiB" "got $\{lv_bytes:-0} bytes"
+fi
+
+ck_pass 'home-from-lv' "/home is mounted from a logical volume"
+
+if [[ -n $\{fs_bytes:-} ]]; then
+  ck_pass fs-home-size "the filesystem fills it"
+else
+  ck_skip fs-home-size "the filesystem fills it" "no filesystem to measure"
+fi
+`
+
 function result(over: Partial<GradeResult> = {}): GradeResult {
   const verdictA = parseVerdict(
     [
@@ -8836,8 +9019,12 @@ function result(over: Partial<GradeResult> = {}): GradeResult {
 }
 
 describe('countCheckpoints', () => {
-  it('counts ck call sites and ignores commented-out ones', () => {
+  it('counts distinct ids and ignores commented-out ones', () => {
     expect(countCheckpoints(GRADE)).toBe(2)
+  })
+
+  it('counts an id once however many branches emit it', () => {
+    expect(countCheckpoints(GRADE_BRANCHED)).toBe(3)
   })
 })
 
@@ -8991,14 +9178,16 @@ export interface SessionRecord {
 }
 
 /**
- * A `ck` call site at the start of a line, with a literal id. Graders are
- * required to write them that way (see Task 22) precisely so this can be
- * counted without running anything.
+ * Every checkpoint id a grader can emit, found without running it. Graders emit
+ * through `ck`, `ck_pass`, `ck_fail` or `ck_skip`, and a single checkpoint is
+ * routinely emitted from several branches of an if/else — so this counts
+ * distinct ids, not call sites. Task 22's authoring rule is what makes it
+ * possible: every id is a literal, never a variable.
  */
-const CK_CALL = /^[ \t]*ck[ \t]+[a-z0-9][a-z0-9-]*/gm
+const CK_CALL = /^[ \t]*ck(?:_pass|_fail|_skip)?[ \t]+["']?([a-z0-9][a-z0-9-]*)/gm
 
 export function countCheckpoints(gradeScript: string): number {
-  return gradeScript.match(CK_CALL)?.length ?? 0
+  return new Set([...gradeScript.matchAll(CK_CALL)].map(m => m[1])).size
 }
 
 export function maxRungFor(mode: SessionMode): Rung {
@@ -9107,6 +9296,16 @@ export class SessionStore {
   }
 
   /**
+   * Put the clock back to zero after the VM has been reverted. Everything else
+   * about the attempt survives, the rung most of all: see the `/reset` route.
+   */
+  restart(id: string, now: number): SessionRecord {
+    const s = this.#require(id)
+    s.startedAt = now
+    return s
+  }
+
+  /**
    * Store a grading result without ending the attempt. The student may grade as
    * often as they like; in drill and exam mode the report they get back is
    * masked, so grading is not a way to discover the answer.
@@ -9130,7 +9329,7 @@ export class SessionStore {
 - [ ] **Step 9: Run the session tests**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npx vitest run test/server/session.test.ts`
-Expected: 13 tests PASS.
+Expected: 14 tests PASS (13 plus the branched-grader count from Step 8).
 
 - [ ] **Step 10: Write the lab runtime**
 
@@ -9415,6 +9614,41 @@ describe('POST /api/sessions/:id/hint', () => {
   })
 })
 
+describe('POST /api/sessions/:id/reset', () => {
+  async function start(a: ReturnType<typeof app>['a'], mode: string) {
+    const res = await a.request('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: TASK.id, mode }),
+      headers: { 'content-type': 'application/json' },
+    })
+    return (await res.json()).id as string
+  }
+
+  it('reverts, re-runs setup, restarts the clock and keeps the rung', async () => {
+    const { a, calls } = app()
+    const id = await start(a, 'practice')
+    await a.request(`/api/sessions/${id}/hint`, { method: 'POST' })
+    const before = await (await a.request(`/api/sessions/${id}`)).json()
+
+    const res = await a.request(`/api/sessions/${id}/reset`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    const after = await res.json()
+
+    expect(calls).toEqual(['reset', 'exec:echo setup', 'reset', 'exec:echo setup'])
+    // The clock restarts and nothing else does. A reset that also rolled the
+    // rung back would make hints refundable.
+    expect(after.startedAt).toBeGreaterThan(before.startedAt)
+    expect(after.rung).toBe(2)
+    expect(after.phase).toBe('active')
+  })
+
+  it('404s for an unknown session', async () => {
+    const { a } = app()
+    const res = await a.request('/api/sessions/nope/reset', { method: 'POST' })
+    expect(res.status).toBe(404)
+  })
+})
+
 describe('grading and finishing', () => {
   async function start(a: ReturnType<typeof app>['a'], mode: string) {
     const res = await a.request('/api/sessions', {
@@ -9641,6 +9875,33 @@ export function createApp(deps: AppDeps) {
     return c.json(view(s))
   })
 
+  app.post('/api/sessions/:id/reset', async (c) => {
+    const s = deps.sessions.get(c.req.param('id'))
+    if (s === undefined) return c.json({ error: 'unknown session' }, 404)
+    const task = deps.bank.tasksById.get(s.taskId)
+    if (task === undefined) return c.json({ error: `unknown task: ${s.taskId}` }, 500)
+
+    try {
+      const scripts = await deps.loadScripts(task, deps.assertLib)
+      // Revert then setup, in that order and for the same reason as session
+      // creation: setup written before the revert is thrown away by it.
+      await deps.runtime.reset()
+      const r = await deps.runtime.exec(scripts.setup)
+      if (r.code !== 0) {
+        return c.json({ error: `setup.sh exited ${r.code}: ${r.stderr || r.stdout}` }, 500)
+      }
+    } catch (e) {
+      return c.json({ error: message(e) }, 500)
+    }
+
+    // The rung is deliberately not rolled back. Disclosure already spent stays
+    // spent - otherwise reset is a way to launder hints, and the rating derived
+    // at finish stops describing the attempt that actually happened. What resets
+    // is the machine and the clock.
+    deps.sessions.restart(s.id, deps.now())
+    return c.json(view(s))
+  })
+
   app.post('/api/sessions/:id/hint', async (c) => {
     const s = deps.sessions.get(c.req.param('id'))
     if (s === undefined) return c.json({ error: 'unknown session' }, 404)
@@ -9732,7 +9993,7 @@ function view(s: SessionRecord) {
 - [ ] **Step 14: Run the API tests**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npx vitest run test/server/app.test.ts`
-Expected: 13 tests PASS.
+Expected: 15 tests PASS (13 plus the two for `/reset`).
 
 Note for the executor: `hono`'s `app.request()` is a real fetch round-trip through the router, so these tests exercise routing, JSON parsing and status codes — not just the handler bodies. There is no need for a listening socket.
 
@@ -9848,10 +10109,10 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import { sshArgs, type VmConfig } from '../engine/vm/config.ts'
 
 /**
- * The minimum a pseudo-terminal has to do. Two implementations satisfy it: a
- * real PTY via node-pty, and a plain pipe to `ssh -tt`. The pipe version has no
- * native dependency, which matters because this environment cannot install a
- * compiler.
+ * The minimum a pseudo-terminal has to do. `spawnSshPipe` is the one
+ * implementation — a plain pipe to `ssh -tt`, no native dependency, which
+ * matters because this environment cannot install a compiler. The interface
+ * exists so `bridge` can be tested against a fake instead of a subprocess.
  */
 export interface PtyLike {
   write(data: string): void
@@ -9934,7 +10195,7 @@ export function spawnSshPipe(cfg: VmConfig, cols: number, rows: number): PtyLike
 
 export interface TerminalDeps {
   cfg: VmConfig
-  /** Swap in a node-pty implementation here if Step 1 managed to install it. */
+  /** Injection point for the tests; production always gets `spawnSshPipe`. */
   spawnPty?: (cfg: VmConfig, cols: number, rows: number) => PtyLike
 }
 
@@ -10048,14 +10309,16 @@ console.log(`  ${bank.tasks.length} tasks, ${bank.concepts.length} concepts`)
 Add to `package.json` scripts:
 
 ```json
-"dev:server": "node --watch src/server/index.ts"
+"dev:server": "node --env-file-if-exists=.env.local src/server/index.ts"
 ```
+
+`--env-file-if-exists` and not `--env-file`: the server reads `RHCSA_VMX` and `RHCSA_VM_IP` out of `.env.local`, and without the flag they are simply absent and `chooseTransport` picks the fake — a confusing failure. The `-if-exists` form keeps the script working on a checkout that has no `.env.local` yet. There is deliberately no `--watch`; see Task 25's note on the scripts block.
 
 - [ ] **Step 20: ACCEPTANCE — drive the API against the real VM**
 
 ```bash
 cd /home/daxtangco/rhcsa-trainer
-node src/server/index.ts &
+node --env-file-if-exists=.env.local src/server/index.ts &
 sleep 3
 curl -s localhost:5175/api/health; echo
 curl -s localhost:5175/api/tasks | head -c 300; echo
@@ -10126,17 +10389,18 @@ need. The cost is a fixed terminal size."
 - Create: `src/web/App.tsx`
 - Create: `src/web/main.tsx`
 - Create: `src/web/index.css`
-- Modify: `index.html`, `vite.config.ts`, `package.json`, `vitest.config.ts`
+- Create: `index.html`, `vite.config.ts` — neither exists yet; Task 1 scaffolded the Node side only
+- Modify: `package.json`, `vitest.config.ts`, `tsconfig.json`
 
 **Interfaces:**
 - Consumes: every route from Task 23.
 - Produces:
-  - `interface TaskSummary`, `interface StartedSession`, `interface GradeReportView`, `interface HintResponse`
+  - `interface TaskSummary`, `interface StartedSession`, `interface SessionView`, `interface GradeReportView`, `interface HintResponse`
   - `class ApiError extends Error { readonly status: number }`
-  - `function createApi(fetchImpl?: typeof fetch)` returning `{ tasks, task, concept, start, hint, grade, finish }`
+  - `function createApi(fetchImpl?: typeof fetch)` returning `{ tasks, task, concept, start, hint, reset, grade, finish }`
   - `function Rail(props: RailProps)`, `function TerminalPane(props)`, `function TaskPicker(props)`, `function App()`
 
-**Layout.** Prompt on top, terminal filling the middle, a fixed rail down the right side. The prompt is always visible because the single most common self-inflicted failure in a practical exam is answering a question you have half-remembered. The rail holds the mode, the timer, the rung, the masked checkpoint count and three buttons; it never holds a hint's content, which opens over the prompt so it cannot be read out of the corner of your eye while you work.
+**Layout.** Prompt on top, terminal filling the middle, a fixed rail down the right side. The prompt is always visible because the single most common self-inflicted failure in a practical exam is answering a question you have half-remembered. The rail holds the mode, the timer, the rung, the masked checkpoint count and four buttons — Hint, Grade, Finish, and a Reset that asks first; it never holds a hint's content, which opens over the prompt so it cannot be read out of the corner of your eye while you work.
 
 - [ ] **Step 1: Confirm the frontend dependencies**
 
@@ -10144,14 +10408,14 @@ Run:
 ```bash
 cd /home/daxtangco/rhcsa-trainer
 npm install react react-dom @xterm/xterm
-npm install -D @vitejs/plugin-react @tailwindcss/vite @types/react @types/react-dom \
+npm install -D vite tailwindcss @vitejs/plugin-react @tailwindcss/vite @types/react @types/react-dom \
   @testing-library/react @testing-library/dom jsdom
 npx vite --version
 ```
 
-Task 1 already installed `vite`, `tailwindcss` and their config. If `@vitejs/plugin-react` was not part of that scaffold, the install above adds it; adding a dependency twice is harmless.
+Task 1 installed none of this — it scaffolded the Node side only. Installing a dependency twice is harmless, so run the whole line even if some of it is already present.
 
-Add the jsdom environment for the component test only, so the Node-side tests keep running in Node. Replace `vitest.config.ts` with this — it is Task 1's file plus three lines, and it **keeps the `RHCSA_VM` gate**. Dropping that gate makes `npm test` try to drive a hypervisor.
+Add the jsdom environment for the component test only, so the Node-side tests keep running in Node. Replace `vitest.config.ts` with this — it is Task 1's file plus the React plugin, the `.tsx` glob and the jsdom mapping, and it **keeps the `RHCSA_VM` gate** and Task 1's `globals` and `exclude` lines verbatim. Dropping that gate makes `npm test` try to drive a hypervisor; dropping the `globals` flag silently disables Testing Library's DOM cleanup.
 
 ```ts
 import { defineConfig } from 'vitest/config'
@@ -10160,9 +10424,16 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   test: {
+    // Registers Vitest's global `afterEach`, which is the only thing that lets
+    // @testing-library/react install its automatic DOM cleanup. Without it the
+    // component tests of Task 24 accumulate mounted trees and `getByText`
+    // starts throwing on duplicate matches. Carried over from Task 1 verbatim.
+    globals: true,
     // .tsx joins the glob for the component tests.
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
-    exclude: process.env.RHCSA_VM === '1' ? [] : ['test/**/*.vm.test.ts'],
+    // Both arms restate node_modules and dist, because naming `exclude` at all
+    // replaces Vitest's defaults rather than adding to them.
+    exclude: process.env.RHCSA_VM === '1' ? ['**/node_modules/**', '**/dist/**'] : ['**/node_modules/**', '**/dist/**', 'test/**/*.vm.test.ts'],
     // jsdom for the component tests only; everything else stays in Node.
     environmentMatchGlobs: [['test/web/**', 'jsdom']],
     testTimeout: 10_000,
@@ -10170,7 +10441,21 @@ export default defineConfig({
 })
 ```
 
-- [ ] **Step 2: Write the failing test for the API client**
+- [ ] **Step 2: Teach `tsc` about the DOM**
+
+This has to happen before the first `.tsx` file is written, or `npm run typecheck` fails on every line of it. In `tsconfig.json`, three `compilerOptions` change — nothing else in the file moves:
+
+```json
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
+    "jsx": "react-jsx",
+```
+
+`jsx: react-jsx` is what lets a `.tsx` file compile without importing `React` for the sake of the factory. `DOM` and `DOM.Iterable` are what make `document`, `HTMLElement` and iterating a `NodeList` type-check. `vite/client` is the important one and the easiest to miss: **it is what declares `*.css` as a module**, so `import './index.css'` in `main.tsx` type-checks with no ambient declaration of your own. Do not add a `declarations.d.ts` with `declare module '*.css'` — it is the same thing written twice, and the second copy is the one that goes stale.
+
+Task 1 deliberately did not set any of this. A DOM lib and a JSX factory in a project with no `.tsx` files is noise, and `"types": ["vite/client"]` fails outright before vite is installed. This task is the one that makes the settings true, so this task sets them.
+
+- [ ] **Step 3: Write the failing test for the API client**
 
 `test/web/api.test.ts`:
 
@@ -10234,12 +10519,12 @@ describe('createApi', () => {
 })
 ```
 
-- [ ] **Step 3: Run it and watch it fail**
+- [ ] **Step 4: Run it and watch it fail**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npx vitest run test/web/api.test.ts`
 Expected: FAIL — cannot resolve `src/web/api.ts`.
 
-- [ ] **Step 4: Implement the API client**
+- [ ] **Step 5: Implement the API client**
 
 `src/web/api.ts`:
 
@@ -10271,6 +10556,22 @@ export interface StartedSession {
   timeBudget: number
   rebootCheck: boolean
   transport: 'ssh' | 'vmrun'
+}
+
+/**
+ * What the session routes hand back: the record itself, without the task fields
+ * that only `POST /api/sessions` bothers to inline. `/reset` returns this.
+ */
+export interface SessionView {
+  id: string
+  taskId: string
+  mode: SessionMode
+  rung: number
+  maxRung: number
+  checkpointTotal: number
+  startedAt: number
+  endedAt?: number
+  phase: string
 }
 
 export interface CheckpointView {
@@ -10354,6 +10655,9 @@ export function createApi(fetchImpl: typeof fetch = fetch) {
     start: (taskId: string, mode: SessionMode) =>
       post<StartedSession>('/api/sessions', { taskId, mode }),
     hint: (id: string) => post<HintResponse>(`/api/sessions/${id}/hint`),
+    // Returns the session, not a report: the machine and the clock go back, the
+    // rung does not.
+    reset: (id: string) => post<SessionView>(`/api/sessions/${id}/reset`),
     grade: (id: string) => post<GradeReportView>(`/api/sessions/${id}/grade`),
     finish: (id: string) =>
       post<{ phase: string; report: GradeReportView; rating: string | null }>(
@@ -10363,12 +10667,12 @@ export function createApi(fetchImpl: typeof fetch = fetch) {
 }
 ```
 
-- [ ] **Step 5: Run the API client tests**
+- [ ] **Step 6: Run the API client tests**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npx vitest run test/web/api.test.ts`
 Expected: 5 tests PASS.
 
-- [ ] **Step 6: Write the failing test for the rail**
+- [ ] **Step 7: Write the failing test for the rail**
 
 `test/web/rail.test.tsx`:
 
@@ -10402,6 +10706,7 @@ const props = {
   onHint: noop,
   onGrade: noop,
   onFinish: noop,
+  onReset: noop,
 }
 
 describe('Rail', () => {
@@ -10491,6 +10796,20 @@ describe('Rail', () => {
     expect(onGrade).toHaveBeenCalledOnce()
   })
 
+  it('asks before resetting, and does nothing if the answer is no', () => {
+    const onReset = vi.fn()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<Rail {...props} session={session()} rung={1} onReset={onReset} />)
+    screen.getByRole('button', { name: /reset lab/i }).click()
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(onReset).not.toHaveBeenCalled()
+
+    confirm.mockReturnValue(true)
+    screen.getByRole('button', { name: /reset lab/i }).click()
+    expect(onReset).toHaveBeenCalledOnce()
+    confirm.mockRestore()
+  })
+
   it('warns when the task needs a transport the server is not using', () => {
     render(
       <Rail
@@ -10505,12 +10824,12 @@ describe('Rail', () => {
 })
 ```
 
-- [ ] **Step 7: Run it and watch it fail**
+- [ ] **Step 8: Run it and watch it fail**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npx vitest run test/web/rail.test.tsx`
 Expected: FAIL — cannot resolve `src/web/components/Rail.tsx`.
 
-- [ ] **Step 8: Implement the rail**
+- [ ] **Step 9: Implement the rail**
 
 `src/web/components/Rail.tsx`:
 
@@ -10522,12 +10841,13 @@ export interface RailProps {
   rung: number
   elapsedS: number
   report?: GradeReportView
-  busy?: 'hinting' | 'grading' | 'finishing' | null
+  busy?: 'hinting' | 'grading' | 'finishing' | 'reverting' | null
   error?: string | null
   serverTransport?: 'ssh' | 'vmrun'
   onHint: () => void
   onGrade: () => void
   onFinish: () => void
+  onReset: () => void
 }
 
 function mmss(total: number): string {
@@ -10655,22 +10975,42 @@ export function Rail(props: RailProps) {
         >
           Finish (F8)
         </button>
+        <button
+          type="button"
+          // Destructive and irreversible, so it asks. No keyboard shortcut
+          // either: a function key that throws away twenty minutes of work is a
+          // trap, and this is the one control that should cost a deliberate
+          // click.
+          onClick={() => {
+            if (window.confirm('Reset the lab? This reverts the VM and restarts the timer.')) {
+              props.onReset()
+            }
+          }}
+          disabled={working}
+          className="rounded border border-zinc-700 px-3 py-2 text-zinc-400 disabled:opacity-40"
+        >
+          {busy === 'reverting' ? 'reverting...' : 'Reset lab'}
+        </button>
       </div>
     </aside>
   )
 }
 ```
 
+**The Reset button confirms, and it does not move the rung.** Reverting the VM throws away everything the student has typed, so a misplaced click has to be recoverable — hence `window.confirm`. What it does *not* undo is disclosure: the hints already opened stay open and `rung` stays where it was, because a reset that refunded them would turn the ladder into a free lookup and make the rating derived at finish describe an attempt that never happened. The wording says what it does in the terms the student cares about: the machine goes back, the clock goes back.
+
+One consequence to expect rather than debug: the terminal dies with the revert. The shell is an ssh session into a machine whose disk has just been rolled back underneath it, so `TerminalPane` will show its closed state and the page needs a reload to get a prompt again. Reconnecting the WebSocket on demand is Phase 2 work; a button that reverts the VM is still worth far more than the reload it costs.
+
 Note the `working` guard. `busy` and `error` are optional, so an omitted `busy` arrives as `undefined`, and `undefined !== null` is `true` — comparing against `null` alone would disable every button for every caller that does not pass the prop, including the test's `props` object.
 
-- [ ] **Step 9: Run the rail tests**
+- [ ] **Step 10: Run the rail tests**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npx vitest run test/web/rail.test.tsx`
-Expected: 10 tests PASS.
+Expected: 11 tests PASS.
 
 If the *hint* button is unexpectedly disabled in the first test, either the `working` guard is comparing against `null` alone, or `atCap` is reading `props.session.rung` (which the fixture sets to 1 regardless) instead of `props.rung`.
 
-- [ ] **Step 10: Write the terminal pane**
+- [ ] **Step 11: Write the terminal pane**
 
 `src/web/components/TerminalPane.tsx`:
 
@@ -10731,6 +11071,10 @@ export function TerminalPane({ cols = 100, rows = 30, onStatus }: TerminalPanePr
 
     return () => {
       sub.dispose()
+      // `onclose` writes to the terminal, and `ws.close()` fires it. Null it
+      // first or the write lands on a terminal that is about to be disposed -
+      // in React's strict-mode double-mount that is every unmount.
+      ws.onclose = null
       ws.close()
       term.dispose()
     }
@@ -10740,7 +11084,7 @@ export function TerminalPane({ cols = 100, rows = 30, onStatus }: TerminalPanePr
 }
 ```
 
-- [ ] **Step 11: Write the task picker**
+- [ ] **Step 12: Write the task picker**
 
 `src/web/components/TaskPicker.tsx`:
 
@@ -10839,7 +11183,7 @@ export function TaskPicker({ tasks, error, busy = false, onStart }: TaskPickerPr
 }
 ```
 
-- [ ] **Step 12: Write the Lab screen**
+- [ ] **Step 13: Write the Lab screen**
 
 `src/web/App.tsx`:
 
@@ -10859,7 +11203,7 @@ import { TerminalPane } from './components/TerminalPane.tsx'
 
 const api = createApi()
 
-type Busy = 'hinting' | 'grading' | 'finishing' | null
+type Busy = 'hinting' | 'grading' | 'finishing' | 'reverting' | null
 
 export function App() {
   const [tasks, setTasks] = useState<TaskSummary[]>([])
@@ -10927,6 +11271,27 @@ export function App() {
       const h = await api.hint(session.id)
       setRung(h.rung)
       setHint(h.all ?? [h.content])
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }, [session])
+
+  const doReset = useCallback(async () => {
+    if (session === undefined) return
+    setBusy('reverting')
+    setError(null)
+    try {
+      const s = await api.reset(session.id)
+      // A fresh object, so the timer effect above re-runs and the clock starts
+      // over. The rung comes back from the server unchanged, and the hints
+      // already opened stay on screen: disclosure that has been spent is spent.
+      setSession({ ...session, rung: s.rung })
+      setRung(s.rung)
+      setReport(undefined)
+      setRating(null)
+      setElapsedS(0)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -11031,6 +11396,7 @@ export function App() {
           onHint={doHint}
           onGrade={doGrade}
           onFinish={doFinish}
+          onReset={doReset}
         />
       </div>
     </div>
@@ -11080,7 +11446,7 @@ body,
 </html>
 ```
 
-- [ ] **Step 13: Proxy the API and the WebSocket through Vite**
+- [ ] **Step 14: Proxy the API and the WebSocket through Vite**
 
 `vite.config.ts`:
 
@@ -11115,14 +11481,14 @@ Add to `package.json` scripts:
 
 There is deliberately no combined `dev` script. Backgrounding the server behind `&` inside npm means Ctrl-C kills the foreground half and orphans the other, and the orphan holds port 5175 — which then looks like a proxy bug. Two terminals.
 
-- [ ] **Step 14: Run every test**
+- [ ] **Step 15: Run every test**
 
 Run: `cd /home/daxtangco/rhcsa-trainer && npx vitest run && npx tsc --noEmit`
 Expected: every test in the repo PASSES and `tsc` reports no errors.
 
 `tsc --noEmit` matters more than usual here: the web code is the first part of the project that is never executed by a test in its real form, so type checking is the only thing standing between a typo in `App.tsx` and a blank page.
 
-- [ ] **Step 15: ACCEPTANCE — use it**
+- [ ] **Step 16: ACCEPTANCE — use it**
 
 Two terminals:
 
@@ -11149,7 +11515,7 @@ Open `http://localhost:5173`. Check, in order:
 
 Then prove the masking works:
 
-9. Reload, choose **Exam** and the same task, press Start, press **F4** immediately. Expect `0 / 5 passed` and `which ones is not shown in this mode`, and no checkpoint names anywhere on screen.
+9. Reload, choose **Exam** and the same task, press Start, press **F4** immediately. Expect `3 / 5 passed` and `which ones is not shown in this mode`, and no checkpoint names anywhere on screen. Three, not zero: `setup.sh` leaves `/home` on a logical volume, `/var` intact and `/etc/fstab` unedited, so only the two size checkpoints fail before you do anything. A grader that reported `0 / 5` on an untouched machine would be checking the wrong things.
 10. Press **F2** twice. The second press is refused with `rung 2 is the maximum in exam mode`.
 11. Press **F8**. The checkpoint names appear now, with the rating.
 
@@ -11158,13 +11524,17 @@ Finally the persistence message, which is the output the whole design exists to 
 12. Reload, **Practice**, same task. Run `sudo lvextend -L 12G /dev/rhel/home`, `sudo xfs_growfs /home`, then `sudo sed -i '\|[[:space:]]/home[[:space:]]|s|^|#|' /etc/fstab`. Press **F4**.
 13. Expect the rail to say *"passed before the reboot and failed after it. That is a persistence failure"*. If it says anything less specific, the wording in `Rail.tsx` was softened — put it back.
 
-- [ ] **Step 16: Commit**
+And the reset control:
+
+14. Press **Reset lab**. Expect a confirmation naming both consequences, then about fifteen seconds of `reverting...`, then a timer back at `00:00` and `df -h /home` reporting 8 GiB again. The rung stays where it was and any hint already open stays open. The terminal will have dropped — reload the page for a new shell.
+
+- [ ] **Step 17: Commit**
 
 ```bash
 cd /home/daxtangco/rhcsa-trainer
 GIT_AUTHOR_NAME=daxtangco GIT_AUTHOR_EMAIL=daxtangco@localhost \
 GIT_COMMITTER_NAME=daxtangco GIT_COMMITTER_EMAIL=daxtangco@localhost \
-git add src/web test/web index.html vite.config.ts vitest.config.ts package.json package-lock.json && \
+git add src/web test/web index.html vite.config.ts vitest.config.ts tsconfig.json package.json package-lock.json && \
 GIT_AUTHOR_NAME=daxtangco GIT_AUTHOR_EMAIL=daxtangco@localhost \
 GIT_COMMITTER_NAME=daxtangco GIT_COMMITTER_EMAIL=daxtangco@localhost \
 git commit -m "feat(web): Lab screen - prompt on top, terminal, rail
@@ -11199,7 +11569,7 @@ Every earlier task built a piece of that sentence. This task proves the sentence
 - Create: `docs/exit-criterion.md`
 - Create: `docs/coverage-phase-1.md`
 - Modify: `README.md`
-- Modify: `package.json` (add `e2e` and `validate` scripts)
+- Modify: `package.json` (add the `test:vm` and `coverage` scripts)
 
 **Interfaces:**
 - Consumes: `createApp` / `AppDeps` (T23), `createLabRuntime` (T23), `SessionStore` (T23), `loadBank` (T7), `loadTaskScripts` (T11), `loadVmConfig` / `chooseTransport` (T18), `VmController` (T17).
@@ -11215,7 +11585,7 @@ In `package.json`, the `scripts` block becomes:
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:vm": "set -a; . ./.env.local; set +a; RHCSA_VM=1 vitest run .vm.test.ts",
+    "test:vm": "[ -f .env.local ] && { set -a; . ./.env.local; set +a; }; RHCSA_VM=1 vitest run .vm.test.ts",
     "typecheck": "tsc --noEmit",
     "rhcsa": "node --env-file-if-exists=.env.local src/cli/index.ts",
     "validate": "node --env-file-if-exists=.env.local src/cli/index.ts validate",
@@ -11226,11 +11596,12 @@ In `package.json`, the `scripts` block becomes:
   },
 ```
 
-`dev:server`, `dev:web` and `build:web` came from Task 24; leave them as they are. Three notes on the rest:
+`dev:server`, `dev:web` and `build:web` came from Task 24; leave them as they are. Four notes on the rest:
 
 - **`validate` and `rhcsa` carry `--env-file-if-exists=.env.local`.** Every VM-touching entrypoint needs `RHCSA_VMX`, and until this task the flag was typed by hand on each acceptance step. Wrapping it in a script is the difference between a command that works in three months and one that fails with `RHCSA_VMX is not set` on a machine where the variable is set.
 - **`coverage` deliberately does not.** It reads the content bank and nothing else; giving it VM config would imply it needs a VM.
-- **`test:vm` sources `.env.local` in the shell instead**, because Vitest is not Node's CLI and `--env-file-if-exists` does not reach it. `set -a` exports every assignment in the file, which is the same trick `provision.sh` uses. The trailing `.vm.test.ts` is a Vitest filename filter, and it is the only way a `*.vm.test.ts` suite ever runs — the default `npm test` excludes them.
+- **`test:vm` sources `.env.local` in the shell instead**, because Vitest is not Node's CLI and `--env-file-if-exists` does not reach it. `set -a` exports every assignment in the file, which is the same trick `provision.sh` uses. The `[ -f .env.local ] &&` guard is the shell's equivalent of `-if-exists`: a bare `. ./.env.local` under a shell that stops on error aborts the whole script on a checkout that has no `.env.local`, so the suite would fail before it could report the far more useful "RHCSA_VMX is not set". The trailing `.vm.test.ts` is a Vitest filename filter, and it is the only way a `*.vm.test.ts` suite ever runs — the default `npm test` excludes them.
+- **No `--watch` on `dev:server`.** A restart drops the WebSocket terminal and the in-memory session store mid-lab — the student's shell dies and their rung and elapsed time go with it, which is a worse outcome than typing the command again. Restart the server by hand.
 
 **The suffix, not the directory, is what gates.** `test/vm/config.test.ts`, `vmrun.test.ts`, `ssh.test.ts` and `select.test.ts` all drive the transports through fakes and must keep running in `npm test`; only `e2e-exit-criterion.vm.test.ts` needs a hypervisor.
 
@@ -11249,6 +11620,7 @@ import { loadVmConfig } from '../../src/engine/vm/config.ts'
 import { VmController } from '../../src/engine/vm/vmrun.ts'
 import { createApp } from '../../src/server/app.ts'
 import { createLabRuntime } from '../../src/server/lab.ts'
+import type { LabRuntime } from '../../src/server/lab.ts'
 import { SessionStore } from '../../src/server/session.ts'
 
 const TASK_ID = 'storage/014-grow-home-lv'
@@ -11257,6 +11629,27 @@ const SNAPSHOT = process.env.RHCSA_SNAPSHOT ?? 'clean'
 
 /** The whole point: the reboot is real, so the budget is real. */
 const E2E_TIMEOUT = 300_000
+
+/**
+ * Wait until the guest will actually accept a command, not merely until vmrun
+ * says it is up. `waitForGuest` polls through the guest *tools*, which answer
+ * seconds before sshd is listening — so the first exec after a revert or a
+ * reboot can fail on connection refused, and over HTTP that arrives as a bare
+ * 500 with nothing in it to diagnose. Thirty attempts two seconds apart is a
+ * minute of slack against a boot that normally takes far less.
+ */
+async function waitForSsh(runtime: LabRuntime): Promise<void> {
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    try {
+      const r = await runtime.exec('true')
+      if (r.code === 0) return
+    } catch {
+      // sshd is not listening yet; that is what we are waiting for.
+    }
+    await new Promise((r) => setTimeout(r, 2000))
+  }
+  throw new Error('guest tools answered but sshd never accepted a connection (30 attempts, 2s apart)')
+}
 
 async function buildApp() {
   const cfg = loadVmConfig(process.env)
@@ -11269,6 +11662,15 @@ async function buildApp() {
   // would mean a second SSH identity and a second set of host keys to get
   // wrong. One connection, used by both the app and the test.
   const runtime = createLabRuntime({ transport, controller, snapshot: SNAPSHOT })
+  // grade() execs verdict B the instant reboot() resolves, and reboot() resolves
+  // on guest-tools readiness. Bolt the sshd wait onto this one instance rather
+  // than changing Task 17's contract for the callers that grade over vmrun and
+  // genuinely do not care.
+  const rebooted = controller.reboot.bind(controller)
+  controller.reboot = async () => {
+    await rebooted()
+    await waitForSsh(runtime)
+  }
   const app = createApp({
     bank,
     runtime,
@@ -11304,7 +11706,10 @@ describe('phase 1 exit criterion', () => {
 
   beforeAll(async () => {
     ctx = await buildApp()
-  }, 60_000)
+    // The guest may have been powered on moments ago; the session-create call
+    // below reverts a snapshot and immediately runs setup.sh over the transport.
+    await waitForSsh(ctx.runtime)
+  }, 120_000)
 
   it(
     'teaches the concept, grades the solution and survives the reboot',
@@ -11359,7 +11764,8 @@ describe('phase 1 exit criterion', () => {
 
       // --- finish: the rating is derived, not asked for --------------------
       const done = await json(await post(app, `/api/sessions/${id}/finish`))
-      expect(done.phase).toBe('done')
+      // 'graded' is the terminal phase in SessionPhase; there is no 'done'.
+      expect(done.phase).toBe('graded')
       // Three rungs used on a fully passing attempt.
       expect(done.rating).toBe('hard')
       const finalReport = done.report as Record<string, unknown>
@@ -11504,17 +11910,25 @@ should exist and does not is a more useful finding than any passing test.
   `rhcsa validate`, not the Lab screen: the server picks one transport at
   startup and that task needs `vmrun`.
 - The terminal is a fixed 100x30 and does not reflow.
+- Teaching after a failed attempt is the rung-3 concept cards and nothing
+  more. There is no per-task post-mortem written for the case where you got
+  it wrong; spec §7.1's second half is Phase 2, and it needs a loader field
+  and a slot in the session view before it needs prose.
+- The UI shows which transport is live, not the VM's power state. Spec §11
+  rule 1 is only partly met; a polled state indicator is Phase 2.
+- `weight` is authored and validated but no selection logic reads it — spec
+  §14.4 scheduling is Phase 2.
 ```
 
-Those four limits are the Phase 2 backlog stated as facts rather than promises. Do not soften them; a limit you can read is a limit you can plan around.
+Those limits are the Phase 2 backlog stated as facts rather than promises. Do not soften them; a limit you can read is a limit you can plan around.
 
 - [ ] **Step 7: Update the README**
 
 The README from Task 15 covers building the VM. Add a section after it so the project is startable after a three-month gap, when nobody remembers the environment variables.
 
-Append to `README.md`:
+Append to `README.md`. Six backticks on this block, not three: the README text itself contains fenced shell blocks, and a three-backtick outer fence would end at the first of them instead of at the end of the section.
 
-```markdown
+``````markdown
 ## Running the trainer
 
 Two processes. The API talks to the VM; Vite serves the UI and proxies to the API.
@@ -11592,11 +12006,12 @@ rules the validator enforces:
   ids it must fail.
 - `# baseline-fail:` on `grade.sh` naming every goal checkpoint — the ones
   that must fail on an untouched machine. Invariant checkpoints are left out.
-- Every `ck` call has a literal id. No loops, no interpolated ids: the
-  masked checkpoint count is derived by reading the script.
+- Every checkpoint id is a literal. No loops, no interpolated ids: the masked
+  checkpoint count is derived by reading the script, counting distinct ids.
+  Emitting one id from several branches is normal and changes nothing.
 - `requires_concepts` lists cards that exist. A missing card is a load error,
   not a warning.
-```
+``````
 
 - [ ] **Step 8: Do the run**
 

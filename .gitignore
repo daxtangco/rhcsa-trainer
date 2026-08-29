@@ -3,3 +3,5 @@ dist/
 *.db
 *.sqlite
 .env
+.env.local
+.superpowers/
