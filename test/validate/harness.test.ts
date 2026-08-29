@@ -318,6 +318,112 @@ describe('validateTask', () => {
     expect(resets).toBe(4)
   })
 
+  it('resets each fixture before its own setup.sh, even right after an earlier fixture failed setup.sh', async () => {
+    // A count alone is blind to position: reset() moved to the end of
+    // runFixture would still fire once per fixture on the happy path, but it
+    // would be unreachable on the early-return for a failing setup.sh, so the
+    // fixture after that failure would inherit unreset state. Pin the order,
+    // not just the count, and do it across a setup.sh failure so an
+    // unreachable end-of-function reset actually shows up as a gap.
+    const w = world()
+    const sequence: string[] = []
+    const d = deps(w)
+    const innerReset = d.reset
+    d.reset = async () => {
+      sequence.push('reset')
+      await innerReset()
+    }
+    let setupCalls = 0
+    d.transport = new FakeTransport((script) => {
+      if (script.includes('SETUP')) {
+        setupCalls++
+        sequence.push('setup')
+        // The middle fixture's setup.sh fails.
+        if (setupCalls === 2) return { stdout: '', stderr: 'boom', code: 1 }
+        return w.handler(script)
+      }
+      if (script.includes('GRADE')) {
+        sequence.push('grade')
+        return w.handler(script)
+      }
+      sequence.push('fixture')
+      return w.handler(script)
+    })
+
+    const s = scripts()
+    s.fixtures = [
+      { kind: 'solution', name: '01.sh', script: CORRECT },
+      { kind: 'solution', name: '02-setup-fails.sh', script: CORRECT },
+      { kind: 'solution', name: '03.sh', script: CORRECT },
+    ]
+
+    await validateTask(task({ rebootCheck: false }), s, d)
+
+    expect(sequence.filter((tag) => tag === 'reset')).toHaveLength(3)
+    const setupIndices = sequence.reduce<number[]>(
+      (acc, tag, i) => (tag === 'setup' ? [...acc, i] : acc),
+      [],
+    )
+    expect(setupIndices).toHaveLength(3)
+    for (const i of setupIndices) {
+      expect(sequence[i - 1]).toBe('reset')
+    }
+  })
+
+  it('fails solution fixtures when the grader emits no checkpoints at all', async () => {
+    // For a rebootCheck: false task, a grader that emits nothing is the only
+    // failure a solution fixture would otherwise produce — expectedStatus
+    // defaults to 'pass' for an id that never shows up, and 'pass' is exactly
+    // what a solution fixture wants, so without this guard both solutions
+    // would report ok: true for a grader that ran and said nothing at all.
+    const w = world()
+    const d = deps(w)
+    d.transport = new FakeTransport((script) =>
+      script.includes('GRADE') ? { stdout: '', stderr: '', code: 0 } : w.handler(script),
+    )
+    const s = scripts({ grade: '# baseline-fail: lv-var-size, persist-config\nGRADE' })
+
+    const results = await validateTask(task({ rebootCheck: false }), s, d)
+    const solutions = results.filter((r) => r.kind === 'solution')
+    expect(solutions.length).toBeGreaterThan(0)
+    for (const r of solutions) {
+      expect(r.ok).toBe(false)
+      expect(r.failures.join('\n')).toMatch(/verdict A: grader emitted no checkpoints/)
+    }
+  })
+
+  it('reports duplicate checkpoint ids exactly once per fixture, not once per verdict', async () => {
+    // duplicateIds runs once, against verdict A only, deliberately: checking
+    // inside checkVerdict would report the same duplicate twice on any task
+    // with rebootCheck: true, since checkVerdict runs once for A and once
+    // for B. Pin the count, not just the presence, on a reboot-checking task
+    // where both verdicts exist.
+    const bad = {
+      transport: new FakeTransport((script) =>
+        script.includes('GRADE')
+          ? {
+              stdout: [
+                '{"id":"dup","desc":"x","status":"pass"}',
+                '{"id":"dup","desc":"y","status":"pass"}',
+              ].join('\n'),
+              stderr: '',
+              code: 0,
+            }
+          : { stdout: '', stderr: '', code: 0 },
+      ),
+      reset: async () => {},
+      reboot: async () => {},
+    }
+    const s = scripts()
+    s.fixtures = [{ kind: 'solution', name: '01.sh', script: CORRECT }]
+
+    const results = await validateTask(task({ rebootCheck: true }), s, bad)
+    const dupeReports = results[0]?.failures.filter((f) =>
+      f.includes('grader emitted duplicate checkpoint ids'),
+    )
+    expect(dupeReports).toHaveLength(1)
+  })
+
   // --- Additions required over the brief (see task-11-brief.md, "Six changes I require") ---
 
   it('change 1: does not let a skip silently satisfy a declared failure', async () => {
