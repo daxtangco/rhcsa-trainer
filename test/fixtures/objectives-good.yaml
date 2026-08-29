@@ -1,0 +1,12 @@
+version: rhel9
+source: "RHCSA 9 Cert Guide objective mapping table, p.38"
+objectives:
+  - id: storage.lvm.resize
+    text: Extend existing logical volumes
+    chapters: [15]
+  - id: storage.fs.xfs
+    text: Create, mount, unmount and use XFS filesystems
+    chapters: [14, 15]
+  - id: users.local.create
+    text: Create, delete and modify local user accounts
+    chapters: [6]
