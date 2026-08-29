@@ -72,6 +72,11 @@ describe('deriveRating', () => {
     expect(deriveRating({ ...base, durationS: 900 })).toBe('good')
   })
 
+  it('gives easy for solving cold exactly at the time budget', () => {
+    // The boundary: finishing at exactly the limit is still competent, not rushed.
+    expect(deriveRating({ ...base, durationS: base.timeBudgetS })).toBe('easy')
+  })
+
   it('gives good when only a nudge was needed', () => {
     expect(deriveRating({ ...base, rungUsed: 2 })).toBe('good')
   })
