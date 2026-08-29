@@ -73,6 +73,22 @@ async function findMarkdown(root: string, problems: string[]): Promise<string[]>
     .sort()
 }
 
+/**
+ * Outcome of attempting to load one file. `file` travels with the outcome on
+ * *both* branches, so a caller never needs to look a file back up by index
+ * to attribute a failure — the impossible "which file was this?" case simply
+ * cannot be expressed. The wrapped promise (see `attempt`) never rejects, so
+ * `Promise.all` over a list of these can never itself reject either.
+ */
+type Outcome<T> = { file: string; ok: true; value: T } | { file: string; ok: false; error: unknown }
+
+function attempt<T>(file: string, promise: Promise<T>): Promise<Outcome<T>> {
+  return promise.then(
+    (value): Outcome<T> => ({ file, ok: true, value }),
+    (error: unknown): Outcome<T> => ({ file, ok: false, error }),
+  )
+}
+
 export async function loadBank(root: string): Promise<Bank> {
   const problems: string[] = []
 
@@ -85,41 +101,49 @@ export async function loadBank(root: string): Promise<Bank> {
   }
 
   const taskFiles = (await findFiles(join(root, 'tasks'), 'task.yaml', problems)).sort()
-  const taskSettled = await Promise.allSettled(taskFiles.map((f) => loadTask(dirname(f))))
+  const taskOutcomes = await Promise.all(
+    taskFiles.map((file) => attempt(file, loadTask(dirname(file)))),
+  )
   const tasks: TaskSpec[] = []
-  for (const [i, result] of taskSettled.entries()) {
-    const file = taskFiles[i]
-    if (file === undefined) continue
-    if (result.status === 'fulfilled') {
-      tasks.push(result.value)
+  for (const outcome of taskOutcomes) {
+    if (outcome.ok) {
+      tasks.push(outcome.value)
     } else {
-      problems.push(...describeFailure(file, result.reason))
+      problems.push(...describeFailure(outcome.file, outcome.error))
     }
   }
 
   const conceptFiles = await findMarkdown(join(root, 'concepts'), problems)
-  const conceptSettled = await Promise.allSettled(conceptFiles.map((f) => loadConcept(f)))
+  const conceptOutcomes = await Promise.all(
+    conceptFiles.map((file) => attempt(file, loadConcept(file))),
+  )
   const concepts: ConceptSpec[] = []
-  for (const [i, result] of conceptSettled.entries()) {
-    const file = conceptFiles[i]
-    if (file === undefined) continue
-    if (result.status === 'fulfilled') {
-      concepts.push(result.value)
+  for (const outcome of conceptOutcomes) {
+    if (outcome.ok) {
+      concepts.push(outcome.value)
     } else {
-      problems.push(...describeFailure(file, result.reason))
+      problems.push(...describeFailure(outcome.file, outcome.error))
     }
   }
 
   const tasksById = new Map<string, TaskSpec>()
   for (const t of tasks) {
-    if (tasksById.has(t.id)) problems.push(`duplicate task id: ${t.id} (${t.dir})`)
-    tasksById.set(t.id, t)
+    const existing = tasksById.get(t.id)
+    if (existing) {
+      problems.push(`duplicate task id: ${t.id} (${existing.dir} and ${t.dir})`)
+    } else {
+      tasksById.set(t.id, t)
+    }
   }
 
   const conceptsById = new Map<string, ConceptSpec>()
   for (const c of concepts) {
-    if (conceptsById.has(c.id)) problems.push(`duplicate concept id: ${c.id} (${c.path})`)
-    conceptsById.set(c.id, c)
+    const existing = conceptsById.get(c.id)
+    if (existing) {
+      problems.push(`duplicate concept id: ${c.id} (${existing.path} and ${c.path})`)
+    } else {
+      conceptsById.set(c.id, c)
+    }
   }
 
   // Every failure path above (loader rejections, duplicate ids, unreadable

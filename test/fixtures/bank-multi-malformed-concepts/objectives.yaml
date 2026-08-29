@@ -1,0 +1,12 @@
+version: rhel9
+source: "test fixture"
+objectives:
+  - id: storage.lvm.resize
+    text: Extend existing logical volumes
+    chapters: [15]
+  - id: users.local.create
+    text: Create, delete and modify local user accounts
+    chapters: [6]
+  - id: autofs.maps.configure
+    text: Configure autofs
+    chapters: [16]

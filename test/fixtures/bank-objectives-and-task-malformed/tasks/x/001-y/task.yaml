@@ -1,0 +1,9 @@
+id: x/001-y
+title: Broken task with no prompt
+chapter: 6
+scope: exam-objective
+rhel: 9
+objectives: [users.local.create]
+difficulty: 1
+time_budget: 120
+weight: medium

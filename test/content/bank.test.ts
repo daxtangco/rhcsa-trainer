@@ -93,13 +93,31 @@ describe('checkCoverage', () => {
 })
 
 describe('loadBank duplicate detection', () => {
-  it('rejects two tasks declaring the same id', async () => {
+  it('rejects two tasks declaring the same id, naming both files', async () => {
     const err = await loadBank(
       new URL('../fixtures/bank-dupe', import.meta.url).pathname,
     ).catch((e: unknown) => e)
 
     expect(err).toBeInstanceOf(ContentError)
-    expect((err as ContentError).problems.join('\n')).toMatch(/duplicate task id/)
+    const joined = (err as ContentError).problems.join('\n')
+    expect(joined).toMatch(/duplicate task id: users\/001-create-account/)
+    // Both collision partners must be named, not just the second-loaded one,
+    // so an author can find the other half of the collision without
+    // grepping the whole bank.
+    expect(joined).toMatch(/tasks\/a\/001-x/)
+    expect(joined).toMatch(/tasks\/b\/001-x/)
+  })
+
+  it('rejects two concepts declaring the same id, naming both files', async () => {
+    const err = await loadBank(
+      new URL('../fixtures/bank-dupe-concepts', import.meta.url).pathname,
+    ).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ContentError)
+    const joined = (err as ContentError).problems.join('\n')
+    expect(joined).toMatch(/duplicate concept id: storage\.lvm-abstraction-stack/)
+    expect(joined).toMatch(/concepts\/a\/dup\.md/)
+    expect(joined).toMatch(/concepts\/b\/dup\.md/)
   })
 })
 
@@ -128,6 +146,38 @@ describe('loadBank aggregates loader failures (deviation 1)', () => {
     expect(err).not.toMatchObject({ name: 'YAMLException' })
     expect((err as ContentError).problems.join('\n')).toMatch(/objectives\.yaml/)
   })
+
+  it('reports both malformed concept files in a single ContentError', async () => {
+    const err = await loadBank(
+      new URL('../fixtures/bank-multi-malformed-concepts', import.meta.url).pathname,
+    ).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ContentError)
+    const joined = (err as ContentError).problems.join('\n')
+    // bad-id.md's id is not dotted lowercase; short-body.md's body is under
+    // the minimum length. Both must be attributable in the same aggregate.
+    expect(joined).toMatch(/bad-id\.md/)
+    expect(joined).toMatch(/short-body\.md/)
+    expect(joined).toMatch(/id must be dotted lowercase/)
+    expect(joined).toMatch(/body must be at least \d+ characters/)
+  })
+
+  it('does not let an objectives failure mask a simultaneous task failure', async () => {
+    // Reinstating fail-fast after the objectives load (throwing immediately
+    // instead of collecting the rejection into `problems`) would make this
+    // pass with only the objectives problem reported and the task file
+    // never even attempted — exactly the regression deviation 1 exists to
+    // prevent. See the loadBank aggregates loader failures tests above.
+    const err = await loadBank(
+      new URL('../fixtures/bank-objectives-and-task-malformed', import.meta.url).pathname,
+    ).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ContentError)
+    const joined = (err as ContentError).problems.join('\n')
+    expect(joined).toMatch(/objectives\.yaml/)
+    expect(joined).toMatch(/tasks\/x\/001-y/)
+    expect(joined).toMatch(/prompt must be a non-empty string/)
+  })
 })
 
 describe('loadBank reports a missing content directory (deviation 2)', () => {
@@ -142,6 +192,12 @@ describe('loadBank reports a missing content directory (deviation 2)', () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('expected loadBank to reject, not resolve')
     expect(result.error).toBeInstanceOf(ContentError)
-    expect((result.error as ContentError).problems.join('\n')).toMatch(/tasks/)
+    // Assert the actual message, not just that "tasks" appears somewhere —
+    // the fixture root itself is named "bank-missing-tasks", so a loose
+    // /tasks/ match would pass even if this were reporting a problem with
+    // the concepts/ directory instead.
+    expect((result.error as ContentError).problems.join('\n')).toMatch(
+      /cannot read directory .*[/\\]tasks: .*ENOENT/,
+    )
   })
 })
