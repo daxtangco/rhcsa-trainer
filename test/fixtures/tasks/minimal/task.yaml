@@ -1,0 +1,11 @@
+id: users/001-create-account
+title: Create a user account
+chapter: 6
+scope: exam-objective
+rhel: 9
+objectives: [users.local.create]
+difficulty: 1
+time_budget: 120
+weight: medium
+prompt: |
+  Create a user named alice.

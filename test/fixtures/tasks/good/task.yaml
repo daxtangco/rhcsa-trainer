@@ -1,0 +1,21 @@
+id: storage/014-shrink-home-grow-var
+title: Reclaim space from /home and give it to /var
+chapter: 15
+scope: exam-objective
+rhel: 9
+objectives: [storage.lvm.resize, storage.fs.xfs]
+requires_concepts:
+  - storage.lvm-abstraction-stack
+  - storage.why-xfs-cannot-shrink
+difficulty: 3
+time_budget: 480
+weight: high
+editions: [r9, r10]
+reboot_check: true
+requires_disks: 0
+claims: [vg:rhel, lv:var]
+transport: ssh
+prompt: |
+  /var is nearly full while /home is mostly empty. Grow the var
+  logical volume to at least 6 GB. All filesystems must mount
+  correctly on boot.

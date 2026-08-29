@@ -1,0 +1,15 @@
+id: Storage/BAD ID
+title: ""
+chapter: 0
+scope: extra-credit
+rhel: 9
+objectives: []
+difficulty: 9
+time_budget: -1
+weight: enormous
+editions: [r9]
+reboot_check: yes-please
+requires_disks: 4
+claims: []
+transport: telnet
+prompt: ""
