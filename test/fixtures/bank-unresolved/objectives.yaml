@@ -1,0 +1,6 @@
+version: rhel9
+source: "test fixture"
+objectives:
+  - id: storage.lvm.resize
+    text: Extend existing logical volumes
+    chapters: [15]

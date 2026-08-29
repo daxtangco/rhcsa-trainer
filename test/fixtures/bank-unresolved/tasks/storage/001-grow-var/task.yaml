@@ -1,0 +1,12 @@
+id: storage/001-grow-var
+title: Grow the var logical volume
+chapter: 15
+scope: exam-objective
+rhel: 9
+objectives: [storage.lvm.resize]
+requires_concepts: [storage.nonexistent-concept]
+difficulty: 3
+time_budget: 480
+weight: high
+prompt: |
+  Grow the var logical volume to at least 6 GB.
