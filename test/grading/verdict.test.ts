@@ -58,6 +58,26 @@ describe('parseVerdict', () => {
     const v = parseVerdict('{"id":"a","desc":"A","status":"pass","weight":3}')
     expect(v.checkpoints[0]?.weight).toBe(3)
   })
+
+  it('does not let a truncated line between two checkpoints swallow either one', () => {
+    // The failure this parser exists to prevent, concentrated into one input:
+    // if a malformed middle line ever ate the checkpoint after it, the user
+    // would see a failing score on a lab they actually got right, and the
+    // scheduler would make them re-study an objective they had mastered.
+    const v = parseVerdict(
+      [
+        '{"id":"a","desc":"A","status":"pass"}',
+        '{"id":"b","desc":"B","status":"fail","det',
+        '{"id":"c","desc":"C","status":"pass"}',
+      ].join('\n'),
+    )
+
+    expect(v.checkpoints).toEqual([
+      { id: 'a', desc: 'A', status: 'pass' },
+      { id: 'c', desc: 'C', status: 'pass' },
+    ])
+    expect(v.noise).toEqual(['{"id":"b","desc":"B","status":"fail","det'])
+  })
 })
 
 describe('duplicateIds', () => {

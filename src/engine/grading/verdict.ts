@@ -16,16 +16,19 @@ export interface Verdict {
 
 const STATUSES: readonly string[] = ['pass', 'fail', 'skip']
 
-function asCheckpoint(v: unknown): Checkpoint | undefined {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
-  const o = v as Record<string, unknown>
-  if (typeof o.id !== 'string' || o.id === '') return undefined
-  if (typeof o.desc !== 'string') return undefined
-  if (typeof o.status !== 'string' || !STATUSES.includes(o.status)) return undefined
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
 
-  const cp: Checkpoint = { id: o.id, desc: o.desc, status: o.status as CheckpointStatus }
-  if (typeof o.detail === 'string') cp.detail = o.detail
-  if (typeof o.weight === 'number') cp.weight = o.weight
+function asCheckpoint(v: unknown): Checkpoint | undefined {
+  if (!isRecord(v)) return undefined
+  if (typeof v.id !== 'string' || v.id === '') return undefined
+  if (typeof v.desc !== 'string') return undefined
+  if (typeof v.status !== 'string' || !STATUSES.includes(v.status)) return undefined
+
+  const cp: Checkpoint = { id: v.id, desc: v.desc, status: v.status as CheckpointStatus }
+  if (typeof v.detail === 'string') cp.detail = v.detail
+  if (typeof v.weight === 'number') cp.weight = v.weight
   return cp
 }
 
@@ -78,6 +81,11 @@ export function allPassed(v: Verdict): boolean {
   return v.checkpoints.length > 0 && v.checkpoints.every((cp) => cp.status === 'pass')
 }
 
+/**
+ * Last-wins on a duplicate id. `duplicateIds` is the mandatory gate that
+ * rejects a grader emitting an id twice, so this never has to arbitrate a
+ * real conflict — last-wins is just the cheapest consistent rule.
+ */
 export function statusById(v: Verdict): Map<string, CheckpointStatus> {
   return new Map(v.checkpoints.map((cp) => [cp.id, cp.status]))
 }
