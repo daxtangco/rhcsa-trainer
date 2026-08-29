@@ -23,6 +23,10 @@ const CONCEPT_ID_RE = /^[a-z0-9]+(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/
  */
 const MIN_BODY_CHARS = 120
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 function stringArray(v: unknown, field: string, problems: string[]): string[] {
   if (v === undefined) return []
   if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) {
@@ -49,7 +53,11 @@ function intInRange(
 export function parseConcept(text: string, path: string): ConceptSpec {
   const problems: string[] = []
   const parsed = matter(text)
-  const fm = parsed.data as Record<string, unknown>
+
+  if (!isRecord(parsed.data)) {
+    throw new ContentError(path, ['front matter must be a mapping'])
+  }
+  const fm = parsed.data
 
   const id = typeof fm.id === 'string' && CONCEPT_ID_RE.test(fm.id) ? fm.id : ''
   if (!id) problems.push('id must be dotted lowercase, e.g. storage.lvm-abstraction-stack')
@@ -60,7 +68,7 @@ export function parseConcept(text: string, path: string): ConceptSpec {
   const rhel = intInRange(fm.rhel, 'rhel', 9, 10, problems)
 
   const objectives = stringArray(fm.objectives, 'objectives', problems)
-  if (objectives.length === 0 && Array.isArray(fm.objectives)) {
+  if (fm.objectives === undefined || (Array.isArray(fm.objectives) && objectives.length === 0)) {
     problems.push('objectives must list at least one objective id')
   }
 

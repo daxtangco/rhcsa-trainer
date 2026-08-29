@@ -38,4 +38,20 @@ describe('loadConcept', () => {
     expect(p).toMatch(/rhel must be an integer 9-10/)
     expect(p).toMatch(/objectives must be a list of strings/)
   })
+
+  it('rejects an omitted objectives key, because a card with no objectives is unreachable from the disclosure ladder', async () => {
+    const err = (await loadConcept(`${FIXTURES}missing-objectives.md`).catch(
+      (e: unknown) => e,
+    )) as ContentError
+    expect(err).toBeInstanceOf(ContentError)
+    expect(err.problems).toEqual(['objectives must list at least one objective id'])
+  })
+
+  it('rejects an explicit empty objectives list distinctly from the omitted-key case', async () => {
+    const err = (await loadConcept(`${FIXTURES}empty-objectives.md`).catch(
+      (e: unknown) => e,
+    )) as ContentError
+    expect(err).toBeInstanceOf(ContentError)
+    expect(err.problems).toEqual(['objectives must list at least one objective id'])
+  })
 })
