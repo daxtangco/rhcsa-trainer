@@ -33,7 +33,11 @@ export function parseObjectives(raw: unknown, where: string): ObjectiveSet {
   if (!source) problems.push('source must cite where the taxonomy was transcribed from')
 
   const list = Array.isArray(raw.objectives) ? raw.objectives : []
-  if (list.length === 0) problems.push('objectives must list at least one objective')
+  if (!Array.isArray(raw.objectives)) {
+    problems.push('objectives must be a list of objectives')
+  } else if (list.length === 0) {
+    problems.push('objectives must list at least one objective')
+  }
 
   const objectives: Objective[] = []
   const seen = new Set<string>()
