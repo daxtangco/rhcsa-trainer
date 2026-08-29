@@ -180,7 +180,106 @@ describe('grade', () => {
     const bCheckpoint = r.verdictB?.checkpoints.find((cp) => cp.id === 'b')
     expect(bCheckpoint?.status).toBe('fail')
     expect(bCheckpoint?.detail).toBeTruthy()
+    // Finding 1: the synthesized checkpoint must carry A's desc through, not
+    // an empty placeholder - the report builder shows desc to the user, and
+    // losing it turns a named regression into an unnamed failed checkpoint.
+    expect(bCheckpoint?.desc).toBe('B check')
     expect(r.regressions.map((cp) => cp.id)).toEqual(['b'])
+  })
+
+  it('appends multiple checkpoints missing from B in verdict A\'s original order, after B\'s own checkpoints', async () => {
+    // Finding 2: with only one missing id (as in the tests above), reversing
+    // the append order is invisible. Four ids, three of them missing, is
+    // enough that a reversed or sorted append would show up as a reordering.
+    const verdictALines = [
+      '{"id":"a","desc":"A check","status":"pass"}',
+      '{"id":"b","desc":"B check","status":"pass"}',
+      '{"id":"c","desc":"C check","status":"pass"}',
+      '{"id":"d","desc":"D check","status":"pass"}',
+    ].join('\n')
+    // B's grader dies right after reporting "a" - b, c, d never ran.
+    const verdictBLines = '{"id":"a","desc":"A check","status":"pass"}'
+
+    let rebooted = false
+    const t = new FakeTransport(() => ({
+      stdout: rebooted ? verdictBLines : verdictALines,
+      stderr: '',
+      code: 0,
+    }))
+
+    const r = await grade({
+      task: task(),
+      transport: t,
+      gradeScript: 'grade',
+      reboot: async () => {
+        rebooted = true
+      },
+    })
+
+    // "a" is B's own checkpoint; b, c, d are appended, and must stay in A's order.
+    expect(r.verdictB?.checkpoints.map((cp) => cp.id)).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('keeps verdict B\'s own noise when checkpoints are completed', async () => {
+    // Finding 3: the completion path builds a new Verdict object; confirm it
+    // does not drop B's noise while doing so (symmetric to the equivalent
+    // assertion already made for the rebootError downgrade path below).
+    const verdictALines = [
+      '{"id":"a","desc":"A check","status":"pass"}',
+      '{"id":"b","desc":"B check","status":"pass"}',
+    ].join('\n')
+    const verdictBLines = [
+      'WARNING: lvs emitted a stray line',
+      '{"id":"a","desc":"A check","status":"pass"}',
+    ].join('\n')
+
+    let rebooted = false
+    const t = new FakeTransport(() => ({
+      stdout: rebooted ? verdictBLines : verdictALines,
+      stderr: '',
+      code: 0,
+    }))
+
+    const r = await grade({
+      task: task(),
+      transport: t,
+      gradeScript: 'grade',
+      reboot: async () => {
+        rebooted = true
+      },
+    })
+
+    expect(r.verdictB?.noise).toEqual(['WARNING: lvs emitted a stray line'])
+  })
+
+  it('does not let mutating a completed verdict B\'s noise reach verdict A\'s noise', async () => {
+    // Finding 4: the completion path must not alias verdict B's returned
+    // noise array with anything a caller could also reach through verdictA.
+    const verdictALines = [
+      '{"id":"a","desc":"A check","status":"pass"}',
+      '{"id":"b","desc":"B check","status":"pass"}',
+    ].join('\n')
+    const verdictBLines = '{"id":"a","desc":"A check","status":"pass"}'
+
+    let rebooted = false
+    const t = new FakeTransport(() => ({
+      stdout: rebooted ? verdictBLines : verdictALines,
+      stderr: '',
+      code: 0,
+    }))
+
+    const r = await grade({
+      task: task(),
+      transport: t,
+      gradeScript: 'grade',
+      reboot: async () => {
+        rebooted = true
+      },
+    })
+
+    const verdictANoiseBefore = [...r.verdictA.noise]
+    r.verdictB?.noise.push('injected by a caller')
+    expect(r.verdictA.noise).toEqual(verdictANoiseBefore)
   })
 
   it('completes a checkpoint missing from B as fail but does not count it as a regression when it had already failed in A', async () => {
@@ -305,6 +404,11 @@ describe('finalVerdict', () => {
     expect(verdictA.checkpoints[0]?.status).toBe('pass')
     expect(verdictA.checkpoints[1]?.status).toBe('pass')
     expect(verdictA.checkpoints).toHaveLength(2)
+
+    // Finding 4: the returned verdict's noise array must not be the same
+    // array as verdictA's - pushing onto it must not reach back into A.
+    v.noise.push('injected by a caller')
+    expect(verdictA.noise).toEqual(['stray warning'])
   })
 
   it('only downgrades checkpoints that had already passed, leaving fail and skip alone', () => {

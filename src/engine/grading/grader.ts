@@ -45,7 +45,10 @@ function completeVerdictB(verdictA: Verdict, verdictB: Verdict): Verdict {
     missing.push({ id: cp.id, desc: cp.desc, status: 'fail', detail: NOT_REPORTED_DETAIL })
   }
   if (missing.length === 0) return verdictB
-  return { checkpoints: [...verdictB.checkpoints, ...missing], noise: verdictB.noise }
+  // Copy noise rather than reusing verdictB's array: the returned verdict
+  // must share no mutable state with its input, so a caller pushing onto the
+  // result cannot write back into a verdict this module did not create.
+  return { checkpoints: [...verdictB.checkpoints, ...missing], noise: [...verdictB.noise] }
 }
 
 /**
@@ -67,7 +70,10 @@ export function finalVerdict(r: GradeResult): Verdict {
           ? { ...cp, status: 'fail', detail: REBOOT_FAILED_DETAIL }
           : { ...cp },
       ),
-      noise: r.verdictA.noise,
+      // Copied, not aliased: verdictA.noise is still exposed on the input
+      // GradeResult, and a caller mutating the returned verdict's noise must
+      // not reach back into it.
+      noise: [...r.verdictA.noise],
     }
   }
   return r.verdictB ?? r.verdictA
