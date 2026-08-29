@@ -621,7 +621,7 @@ describe('loadTask', () => {
   it('rejects a difficulty outside 1-5 and a requires_disks above 3', async () => {
     const err = (await loadTask(`${FIXTURES}bad`).catch((e: unknown) => e)) as ContentError
     expect(err.problems.join('\n')).toMatch(/difficulty must be an integer 1-5/)
-    // The VM has exactly 3 spare disks (spec section 4.1), so 4 is unsatisfiable.
+    // Spec section 4.1's VM design has three spare disk slots, so 4 is unsatisfiable.
     expect(err.problems.join('\n')).toMatch(/requires_disks must be an integer 0-3/)
   })
 })
@@ -666,7 +666,12 @@ const SCOPES: readonly string[] = ['exam-objective', 'instrumental']
 const WEIGHTS: readonly string[] = ['low', 'medium', 'high']
 const TRANSPORTS: readonly string[] = ['ssh', 'vmrun']
 
-/** The VM has three spare disks (spec section 4.1); more is unsatisfiable. */
+/**
+ * Spec section 4.1's VM design has three spare disk slots; more is
+ * unsatisfiable. Phase 1 provisions none of them (see Task 19), so every
+ * Phase 1 task declares 0 — this is the schema's bound, not a promise that
+ * three disks are attached.
+ */
 const MAX_SPARE_DISKS = 3
 
 export interface TaskSpec {
@@ -815,8 +820,10 @@ GIT_AUTHOR_NAME=daxtangco GIT_AUTHOR_EMAIL=daxtangco@localhost \
 GIT_COMMITTER_NAME=daxtangco GIT_COMMITTER_EMAIL=daxtangco@localhost \
 git commit -m "feat(content): add TaskSpec loader with aggregating validation
 
-requires_disks is capped at 3 because the VM has two spare disks,
-so a higher value is unsatisfiable rather than merely unusual."
+requires_disks is capped at 3 because spec section 4.1's VM design has three
+spare disk slots, so a higher value is unsatisfiable rather than merely
+unusual. Phase 1 attaches none of them (Task 19), and every Phase 1 task
+declares 0."
 ```
 
 ---
@@ -8650,7 +8657,7 @@ Eight concept cards, one per mechanism the four tasks depend on."
   - `function countCheckpoints(gradeScript: string): number`
   - `function reportFor(mode: SessionMode, result: GradeResult, revealed: boolean): GradeReport`
   - `class SessionStore` with `create` / `get` / `list` / `advanceRung` / `restart` / `record` / `finish`
-  - `interface LabRuntime { transportKind: TransportKind; reset(): Promise<void>; exec(script: string): Promise<ExecResult> }`
+  - `interface LabRuntime { transportKind: TransportKind; reset(): Promise<void>; exec(script: string): Promise<ExecResult>; gradeTask(task: TaskSpec, gradeScript: string): Promise<GradeResult> }`
   - `interface AppDeps` / `function createApp(deps: AppDeps): Hono`
   - `interface PtyLike` / `function attachTerminal(server, deps): WebSocketServer`
 
