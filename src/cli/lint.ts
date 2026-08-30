@@ -71,7 +71,14 @@ export interface ScriptRecord {
 export interface LintResult {
   /** Anything here is an error and makes the command exit non-zero. */
   problems: string[]
-  /** Informational only. Never affects the exit code — see `checkUndeclared`. */
+  /**
+   * Informational only. Never affects the exit code — and that is safe **because**
+   * `resolveUndeclared` no longer files every undeclared id here: the ones nothing
+   * in the task names are `problems`. This list is now the anchored-but-undeclared
+   * category alone, which is a legitimate authoring shape rather than a defect
+   * waiting for someone to read stdout. The name in this comment used to be
+   * `checkUndeclared`, a function that does not exist.
+   */
   notes: string[]
   /** Every `.sh` under the root carrying a header, sorted by path. */
   inventory: ScriptRecord[]
@@ -379,6 +386,68 @@ async function checkFixtureFloors(
   }
 }
 
+/**
+ * Decide what an emitted-but-undeclared checkpoint id **is**, once every header in
+ * the task has been read.
+ *
+ * This used to be a note and nothing else, which meant a whole class of defect had
+ * no signal at all: rename `home-from-lv` to `home-from-lvm` in a grader and the
+ * lint prints one more informational line, exits 0, and nothing anywhere states
+ * that a checkpoint the student is scored on is now referenced by nothing. Notes do
+ * not fail the gate by design and should not — but the set of note-worthy ids and
+ * the set of typos were the same set, so the design was covering for the defect.
+ *
+ * The ruling, and why this rather than "make it an error": **an id no header in the
+ * task names anywhere is an error; an id only a sibling anti-solution's
+ * `# expect-fail:` names stays a note.** Reconciling against the note set is what
+ * makes the distinction available, and the distinction is real. A grader
+ * legitimately emits invariants that pass at the unsolved baseline, so they cannot
+ * appear in `# baseline-fail:`; that is not a mistake and failing on it would fail
+ * the whole bank. But an anti-solution naming the id *is* a second reference to it
+ * — something in the task asserts the checkpoint exists and predicts what it does —
+ * so the id is anchored, and a rename breaks the anti-solution check loudly
+ * (`# expect-fail: names X, which the grader never emits`) rather than quietly.
+ * Measured on today's bank: all three notes are anti-solution-named
+ * (`014` `home-from-lv` and `persist-config` via `antisolutions/02`, `017`
+ * `default-target` via `antisolutions/03`), so this ships as 0 problems and 3
+ * notes with no `content/**` edit. Making every undeclared id an error would have
+ * needed three header edits to a bank whose graders are correct, and would have
+ * deleted the legitimate category along with the defect.
+ *
+ * `# unprobed-invariant:` remains the way to say "this is deliberately unprobed",
+ * and it is now the *only* way — which is what makes the error actionable: an
+ * author reading it either fixes the typo or declares the invariant.
+ */
+function resolveUndeclared(
+  undeclaredByTask: Map<string, { where: string; ids: string[] }>,
+  probedByTask: Map<string, Set<string>>,
+  problems: string[],
+  notes: string[],
+): void {
+  // Sorted by task directory, because `Map` iteration follows insertion order and
+  // the golden fixture and the operator both want a stable transcript.
+  for (const dir of [...undeclaredByTask.keys()].sort()) {
+    const entry = undeclaredByTask.get(dir)
+    if (entry === undefined) continue
+    const probed = probedByTask.get(dir) ?? new Set<string>()
+    for (const id of entry.ids) {
+      if (probed.has(id)) {
+        notes.push(
+          `${entry.where}: ${id} is emitted but named by no header on this grader; ` +
+            `a sibling anti-solution's "# expect-fail:" names it, so it is an invariant that passes at baseline`,
+        )
+      } else {
+        problems.push(
+          `${entry.where}: ${id} is emitted but named by no header anywhere in this task — not ` +
+            `"# baseline-fail:", not "# unprobed-invariant:", and no anti-solution's "# expect-fail:". ` +
+            `Nothing states this checkpoint should exist, so a typo in its id reads as a passing invariant. ` +
+            `Declare it, or fix the id.`,
+        )
+      }
+    }
+  }
+}
+
 export interface LintOptions {
   /**
    * Accept a content root containing no `grade.sh`. Off by default; see the
@@ -404,6 +473,21 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
   // against its sibling grade.sh — which is the script that actually emits, and
   // what `checkEmittedIds` compares against at runtime.
   const emittedByTask = new Map<string, Set<string>>()
+
+  /**
+   * Emitted ids no header on the grader itself names, per task, held until the
+   * anti-solution loop has run. See `resolveUndeclared` for why the decision
+   * cannot be made where the ids are found.
+   */
+  const undeclaredByTask = new Map<string, { where: string; ids: string[] }>()
+
+  /**
+   * Ids some sibling anti-solution's `# expect-fail:` names, per task. Bare ids,
+   * not the phase-suffixed `declared` form: these are compared against emitted
+   * ids, and `HeaderRecord.declared`'s docstring is explicit that a phase-suffixed
+   * string must never be.
+   */
+  const probedByTask = new Map<string, Set<string>>()
   const graders = files.filter((f) => f.endsWith('/grade.sh'))
 
   // "Nothing to check" must not be indistinguishable from "all clear".
@@ -551,15 +635,14 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
       )
     }
 
-    // Informational, and deliberately not an error. A grader legitimately emits
-    // invariant checkpoints that must pass at baseline and are therefore absent
-    // from `# baseline-fail:` by design; `# unprobed-invariant:` declares the
-    // knowingly-unprobed ones. Failing on these would fail every task in the bank.
+    // Collected, not judged yet: whether an emitted-but-undeclared id is a note or
+    // an error depends on the task's **anti-solutions**, which are parsed in the
+    // loop below. Deciding here is what made this a note-only check.
     const declared = new Set([...baseline.ids, ...unprobed.ids])
-    const undeclared = [...emitted].filter((id) => !declared.has(id)).sort()
-    for (const id of undeclared) {
-      notes.push(`${where}: ${id} is emitted but named by no header (an invariant that passes at baseline)`)
-    }
+    undeclaredByTask.set(taskDirOf(grader), {
+      where,
+      ids: [...emitted].filter((id) => !declared.has(id)).sort(),
+    })
 
     const headers: HeaderRecord[] = [{ kind: 'baseline-fail', declared: [...baseline.declared].sort() }]
     if (unprobed.declared.length > 0) {
@@ -577,6 +660,18 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
 
     const expected = parseDeclaredIds(script, where, 'expect-fail')
     for (const p of expected.problems) problems.push(`${where}: ${p}`)
+
+    // Every id this anti-solution predicts, whether or not the grader emits it.
+    // Recorded before the emitted-id check below so a `# expect-fail:` naming an id
+    // the grader never emits is reported by that check rather than being silently
+    // promoted into "something probes this".
+    const taskDir = dirname(dirname(file))
+    let probed = probedByTask.get(taskDir)
+    if (probed === undefined) {
+      probed = new Set<string>()
+      probedByTask.set(taskDir, probed)
+    }
+    for (const id of expected.ids) probed.add(id)
 
     if (emitted === undefined) {
       problems.push(`${where}: no sibling grade.sh, so its "# expect-fail:" ids cannot be checked`)
@@ -618,6 +713,8 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
       emitted: [...checkpointIds(script)].sort(),
     })
   }
+
+  resolveUndeclared(undeclaredByTask, probedByTask, problems, notes)
 
   inventory.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
   return { problems, notes, inventory, gradersChecked: graders.length }

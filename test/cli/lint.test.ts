@@ -102,14 +102,20 @@ describe('rhcsa lint on the shipped bank', () => {
     }
   })
 
-  it('reports emitted-but-undeclared ids as notes on stdout, never as failures', async () => {
+  it('reports an anti-solution-anchored undeclared id as a note, never as a failure', async () => {
     // Getting this backwards would fail every task in the bank: a grader
     // legitimately emits invariants that pass at baseline and are therefore
-    // absent from `# baseline-fail:` by design.
+    // absent from `# baseline-fail:` by design. What makes leaving it as a note
+    // safe is the anchor — a sibling anti-solution's `# expect-fail:` names it, so
+    // a rename breaks that check loudly. An id with no anchor is now an error; see
+    // `catches a checkpoint id no header anywhere in the task names`.
     const r = await lint(CONTENT)
     expect(r.code).toBe(0)
-    expect(r.out).toMatch(/note: .*home-from-lv is emitted but named by no header/)
+    expect(r.out).toMatch(/note: .*home-from-lv is emitted but named by no header on this grader/)
     expect(r.err).not.toMatch(/home-from-lv/)
+    // The whole shipped bank sits in the note category and none of it in the error
+    // one, which is what "no content edits" means here.
+    expect(r.out).not.toMatch(/named by no header anywhere in this task/)
   })
 })
 
@@ -259,7 +265,63 @@ describe('rhcsa lint fails on planted defects', () => {
     expect(r.code).toBe(1)
     expect(r.err).toMatch(/LV_Size/)
     expect(r.err).toMatch(/Other_Id/)
-    expect(r.err).toMatch(/^2 problem\(s\)$/m)
+    // Four, not two: each planted id breaks two independent rules at once — the
+    // kebab grammar and, since `resolveUndeclared`, "no header anywhere in this
+    // task names this". Both are real and both name the id, so collapsing them
+    // would mean one rule silently covering for the other.
+    expect(r.err).toMatch(/^4 problem\(s\)$/m)
+    expect(countProblems(r.err, /is not lowercase kebab-case/)).toBe(2)
+    expect(countProblems(r.err, /named by no header anywhere in this task/)).toBe(2)
+  })
+
+  it('catches a checkpoint id no header anywhere in the task names', async () => {
+    // The finding. A grader that emits an id nothing declares used to produce one
+    // more informational note and exit 0 — so renaming a checkpoint, or typing its
+    // id wrong, was swallowed with no signal at all. The id here is valid kebab and
+    // is not a variable, so no other rule can claim the kill: the only thing wrong
+    // with it is that nothing in the task says it should exist.
+    const root = await bankCopy()
+    await plant(root, (t) => `${t}true; ck orphaned-checkpoint "nothing declares this" $?\n`)
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/orphaned-checkpoint is emitted but named by no header anywhere in this task/)
+    // Actionable in both of the two ways an author can act.
+    expect(r.err).toMatch(/Declare it, or fix the id/)
+    expect(countProblems(r.err, /orphaned-checkpoint/)).toBe(1)
+    // And it is no longer filed as a note, which is what made it invisible.
+    expect(r.out).not.toMatch(/note: .*orphaned-checkpoint/)
+  })
+
+  it('catches a renamed checkpoint id, which used to be two notes and exit 0', async () => {
+    // The realistic shape: a rename that lands in the grader and nowhere else.
+    // `home-from-lv` is named only by an anti-solution's `# expect-fail:`, so
+    // before this it was a note either way — the note set and the typo set were the
+    // same set, and the lint could not tell them apart.
+    const root = await bankCopy()
+    await plant(root, (t) => t.replaceAll('home-from-lv ', 'home-from-lvm '))
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/home-from-lvm is emitted but named by no header anywhere in this task/)
+    // And the far end of the rename is loud too, which is the property that makes
+    // an anti-solution-named id safe to leave as a note.
+    expect(r.err).toMatch(/expect-fail names home-from-lv, which the grader never emits/)
+  })
+
+  it('leaves an id an anti-solution names as a note, so the bank does not need editing', async () => {
+    // The control, and the ruling. An invariant that passes at the unsolved
+    // baseline cannot appear in `# baseline-fail:`, so undeclared-on-the-grader is
+    // a legitimate shape; an anti-solution naming the id is a second reference that
+    // anchors it, and breaking that reference is an error (the test above). Without
+    // this arm, making every undeclared id an error would satisfy the two tests
+    // above while failing three graders that are correct.
+    const root = await bankCopy()
+    const r = await lint(root)
+    expect(r.code).toBe(0)
+    expect(r.err).toBe('')
+    expect(r.out).toMatch(/note: .*home-from-lv is emitted but named by no header on this grader/)
+    expect(r.out).toMatch(/a sibling anti-solution's "# expect-fail:" names it/)
   })
 })
 

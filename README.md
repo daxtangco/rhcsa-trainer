@@ -165,9 +165,14 @@ And four conventions the validator does not enforce, or enforces only in part:
   `# unprobed-invariant: var-intact`: it asserts `/var` was left alone, which
   is already true on an untouched machine, so it cannot be a baseline failure.
   Only `rhcsa validate` and `npm run lint:content` check the declared ids
-  against the emitted ones — nothing enforces that the union of probed and
-  unprobed ids accounts for every checkpoint a grader emits, so an id named by
-  no header at all is legal and is reported as a note rather than an error.
+  against the emitted ones. An emitted id that **no** header anywhere in the task
+  names — not `# baseline-fail:`, not `# unprobed-invariant:`, and no
+  anti-solution's `# expect-fail:` — is an **error**: nothing states that
+  checkpoint should exist, so a typo in its id reads as a passing invariant. An id
+  named only by a sibling anti-solution's `# expect-fail:` stays a **note**,
+  because that header is a second reference to the id and a rename breaks it
+  loudly. `home-from-lv` and `persist-config` in 014 and `default-target` in 017
+  are the three live notes.
 - **A task's first solution should be straight-line commands.** Rung 4 shows a
   command sketch built from the sorted-first solution file, so `01-*.sh` is
   what the student reads. The sketch extracts leading words, so `for u in …`
