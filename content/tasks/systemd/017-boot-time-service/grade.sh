@@ -34,7 +34,13 @@ ck default-target "the system boots to multi-user.target" $? "get-default=$targe
 # with it. troubleshooting/028 probes exactly this failure, deliberately, over
 # vmrun - which is why that task exists.
 # unprobed-invariant: sshd-intact
-systemctl is-enabled sshd &>/dev/null
-ck sshd-intact "sshd is still enabled" $?
+# Anchored on the exact string, the same spelling as stamp-enabled above and as
+# selinux/019 and troubleshooting/028 use. is-enabled's exit status is also 0 for
+# static, indirect, generated, alias and enabled-runtime, and this is an
+# invariant - nobody reads it until the day it lies, so the loose form is worse
+# here than in a goal checkpoint.
+sshd_state=$(systemctl is-enabled sshd 2>&1)
+printf '%s' "$sshd_state" | grep -qx enabled
+ck sshd-intact "sshd is still enabled" $? "is-enabled=$sshd_state"
 
 exit 0
