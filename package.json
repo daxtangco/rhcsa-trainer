@@ -11,20 +11,34 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "rhcsa": "node src/cli/index.ts",
-    "dev:server": "node --env-file-if-exists=.env.local src/server/index.ts"
+    "dev:server": "node --env-file-if-exists=.env.local src/server/index.ts",
+    "dev:web": "vite",
+    "build:web": "vite build"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
+    "@xterm/xterm": "^6.0.0",
     "gray-matter": "^4.0.3",
     "hono": "^4.13.5",
     "js-yaml": "^4.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
     "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.2.0",
+    "jsdom": "^30.0.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.8.0",
+    "vite": "^7.3.6",
     "vitest": "^3.0.0"
   }
 }
