@@ -1,0 +1,374 @@
+{
+  "boot.grub.modify": {
+    "text": "Modify the system bootloader",
+    "chapters": [
+      17
+    ]
+  },
+  "boot.lifecycle.shutdown": {
+    "text": "Boot, reboot, and shut down a system normally",
+    "chapters": [
+      5
+    ]
+  },
+  "boot.rescue.interrupt": {
+    "text": "Interrupt the boot process in order to gain access to a system",
+    "chapters": [
+      18
+    ]
+  },
+  "boot.targets.default": {
+    "text": "Configure systems to boot into a specific target automatically",
+    "chapters": [
+      17
+    ]
+  },
+  "boot.targets.manual": {
+    "text": "Boot systems into different targets manually",
+    "chapters": [
+      18
+    ]
+  },
+  "files.links.create": {
+    "text": "Create hard and soft links",
+    "chapters": [
+      3
+    ]
+  },
+  "files.manage.copy-move": {
+    "text": "Create, delete, copy, and move files and directories",
+    "chapters": [
+      3
+    ]
+  },
+  "files.permissions.troubleshoot": {
+    "text": "Diagnose and correct file permission problems",
+    "chapters": [
+      7
+    ]
+  },
+  "files.permissions.ugo-rwx": {
+    "text": "List, set, and change standard ugo/rwx permissions",
+    "chapters": [
+      7
+    ]
+  },
+  "files.permissions.umask": {
+    "text": "Manage default file permissions",
+    "chapters": [
+      7
+    ]
+  },
+  "net.addressing.ipv4-ipv6": {
+    "text": "Configure IPv4 and IPv6 addresses",
+    "chapters": [
+      8
+    ]
+  },
+  "net.firewall.restrict-access-firewalld": {
+    "text": "Restrict network access using firewalld and firewall-cmd",
+    "chapters": [
+      23
+    ]
+  },
+  "net.firewall.settings": {
+    "text": "Configure firewall settings using firewall-cmd/firewalld",
+    "chapters": [
+      23
+    ]
+  },
+  "net.hostname.resolution": {
+    "text": "Configure hostname resolution",
+    "chapters": [
+      8
+    ]
+  },
+  "net.services.autostart": {
+    "text": "Configure network services to start automatically at boot",
+    "chapters": [
+      8
+    ]
+  },
+  "net.services.status": {
+    "text": "Start, stop, and check the status of network services",
+    "chapters": [
+      8
+    ]
+  },
+  "net.ssh.key-auth": {
+    "text": "Configure key-based authentication for SSH",
+    "chapters": [
+      20
+    ]
+  },
+  "pkg.dnf.install-cdn": {
+    "text": "Install and update software packages from Red Hat Content Delivery Network, a remote repository, or from the local file system",
+    "chapters": [
+      9
+    ]
+  },
+  "pkg.flatpak.install-remove": {
+    "text": "Install and remove Flatpak software packages",
+    "chapters": [
+      9
+    ]
+  },
+  "pkg.flatpak.repositories": {
+    "text": "Configure access to Flatpak repositories",
+    "chapters": [
+      9
+    ]
+  },
+  "pkg.rpm.install-remove": {
+    "text": "Install and remove RPM software packages",
+    "chapters": [
+      9
+    ]
+  },
+  "pkg.rpm.repositories": {
+    "text": "Configure access to RPM repositories",
+    "chapters": [
+      9
+    ]
+  },
+  "selinux.booleans.modify": {
+    "text": "Use Boolean settings to modify system SELinux settings",
+    "chapters": [
+      22
+    ]
+  },
+  "selinux.contexts.identify": {
+    "text": "List and identify SELinux file and process context",
+    "chapters": [
+      22
+    ]
+  },
+  "selinux.contexts.restore": {
+    "text": "Restore default file contexts",
+    "chapters": [
+      22
+    ]
+  },
+  "selinux.modes.enforcing-permissive": {
+    "text": "Set enforcing and permissive modes for SELinux",
+    "chapters": [
+      22
+    ]
+  },
+  "selinux.ports.labels": {
+    "text": "Manage SELinux port labels",
+    "chapters": [
+      22
+    ]
+  },
+  "storage.autofs.configure": {
+    "text": "Configure autofs",
+    "chapters": [
+      24
+    ]
+  },
+  "storage.filesystems.create-mount": {
+    "text": "Create, mount, unmount, and use VFAT, ext4, and XFS file systems",
+    "chapters": [
+      14
+    ]
+  },
+  "storage.fstab.uuid-label": {
+    "text": "Configure systems to mount file systems at boot by universally unique ID (UUID) or label",
+    "chapters": [
+      14
+    ]
+  },
+  "storage.lvm.lv": {
+    "text": "Create and delete logical volumes",
+    "chapters": [
+      15
+    ]
+  },
+  "storage.lvm.pv": {
+    "text": "Create and remove physical volumes",
+    "chapters": [
+      15
+    ]
+  },
+  "storage.lvm.resize": {
+    "text": "Extend existing logical volumes",
+    "chapters": [
+      15
+    ]
+  },
+  "storage.lvm.vg": {
+    "text": "Assign physical volumes to volume groups",
+    "chapters": [
+      15
+    ]
+  },
+  "storage.nfs.mount": {
+    "text": "Mount and unmount network file systems using NFS",
+    "chapters": [
+      24
+    ]
+  },
+  "storage.partitions.gpt": {
+    "text": "List, create, and delete partitions on GPT disks",
+    "chapters": [
+      14
+    ]
+  },
+  "storage.swap.nondestructive": {
+    "text": "Add new partitions and logical volumes, and swap to a system non-destructively",
+    "chapters": [
+      14
+    ]
+  },
+  "sys.cron.schedule-systemd-timers": {
+    "text": "Schedule tasks using at, cron and systemd timer units",
+    "chapters": [
+      12
+    ]
+  },
+  "sys.logs.journal": {
+    "text": "Locate and interpret system log files and journals",
+    "chapters": [
+      13
+    ]
+  },
+  "sys.logs.persistent-journal": {
+    "text": "Preserve system journals",
+    "chapters": [
+      13
+    ]
+  },
+  "sys.proc.kill": {
+    "text": "Identify CPU/memory intensive processes and kill processes",
+    "chapters": [
+      10
+    ]
+  },
+  "sys.proc.scheduling": {
+    "text": "Adjust process scheduling",
+    "chapters": [
+      10
+    ]
+  },
+  "sys.time.chrony": {
+    "text": "Configure time service clients",
+    "chapters": [
+      25
+    ]
+  },
+  "sys.tuned.profiles": {
+    "text": "Manage tuning profiles",
+    "chapters": [
+      10
+    ]
+  },
+  "systemd.services.enable": {
+    "text": "Start and stop services and configure services to start automatically at boot",
+    "chapters": [
+      11
+    ]
+  },
+  "tools.archive.tar-gzip-bzip2": {
+    "text": "Archive, compress, unpack, and uncompress files using tar, gzip, and bzip2",
+    "chapters": [
+      3
+    ]
+  },
+  "tools.editor.text-files": {
+    "text": "Create and edit text files",
+    "chapters": [
+      4
+    ]
+  },
+  "tools.man.documentation": {
+    "text": "Locate, read, and use system documentation including man, info, and files in /usr/share/doc",
+    "chapters": [
+      2
+    ]
+  },
+  "tools.script.command-output": {
+    "text": "Processing output of shell commands within a script",
+    "chapters": [
+      19
+    ]
+  },
+  "tools.script.conditionals": {
+    "text": "Conditionally execute code (use of: if, test, [], etc.)",
+    "chapters": [
+      19
+    ]
+  },
+  "tools.script.inputs": {
+    "text": "Process script inputs ($1, $2, etc.)",
+    "chapters": [
+      19
+    ]
+  },
+  "tools.script.loops": {
+    "text": "Use Looping constructs (for, etc.) to process file, command line input",
+    "chapters": [
+      19
+    ]
+  },
+  "tools.shell.prompt": {
+    "text": "Access a shell prompt and issue commands with correct syntax",
+    "chapters": [
+      2
+    ]
+  },
+  "tools.shell.redirection": {
+    "text": "Use input-output redirection (>, >>, |, 2>, etc.)",
+    "chapters": [
+      2
+    ]
+  },
+  "tools.ssh.client": {
+    "text": "Access remote systems using SSH",
+    "chapters": [
+      5
+    ]
+  },
+  "tools.ssh.transfer": {
+    "text": "Securely transfer files between systems",
+    "chapters": [
+      5
+    ]
+  },
+  "tools.text.grep": {
+    "text": "Use grep and regular expressions to analyze text",
+    "chapters": [
+      4
+    ]
+  },
+  "users.accounts.manage": {
+    "text": "Create, delete, and modify local user accounts",
+    "chapters": [
+      6
+    ]
+  },
+  "users.groups.manage": {
+    "text": "Create, delete, and modify local groups and group memberships",
+    "chapters": [
+      6
+    ]
+  },
+  "users.login.switch": {
+    "text": "Log in and switch users in multi-user targets",
+    "chapters": [
+      5
+    ]
+  },
+  "users.passwords.aging": {
+    "text": "Change passwords and adjust password aging for local user accounts",
+    "chapters": [
+      6
+    ]
+  },
+  "users.sudo.privileged": {
+    "text": "Configure privileged access",
+    "chapters": [
+      6
+    ]
+  }
+}

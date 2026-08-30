@@ -62,7 +62,7 @@ objectives:
   - id: tools.archive.tar-gzip-bzip2
     text: "Archive, compress, unpack, and uncompress files using tar, gzip, and bzip2"
     chapters: [3]
-  - id: tools.editor.vim
+  - id: tools.editor.text-files
     text: "Create and edit text files"
     chapters: [4]
   - id: files.manage.copy-move
@@ -82,7 +82,7 @@ objectives:
   # NEW SECTION in RHEL 10. Absent from the RHCSA 10 Cert Guide's Table 1; taken
   # from the book's Chapter 9 opener and confirmed by Red Hat's published page,
   # which lists them under a "Manage software" heading of their own.
-  - id: pkg.dnf.repositories
+  - id: pkg.rpm.repositories
     text: "Configure access to RPM repositories"
     chapters: [9]
   - id: pkg.rpm.install-remove
@@ -136,10 +136,10 @@ objectives:
   - id: sys.logs.persistent-journal
     text: "Preserve system journals"
     chapters: [13]
-  - id: systemd.services.network
+  - id: net.services.status
     text: "Start, stop, and check the status of network services"
     chapters: [8]
-  - id: net.ssh.transfer
+  - id: tools.ssh.transfer
     text: "Securely transfer files between systems"
     chapters: [5]
 

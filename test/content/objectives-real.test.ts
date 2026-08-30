@@ -14,12 +14,17 @@ describe('content/objectives.yaml', () => {
     expect(set.source).toMatch(/visual/i)
   })
 
-  it('has a plausible objective count', async () => {
-    // EX200 publishes dozens of bullets across ~10 areas. Far fewer means
-    // bullets were merged; far more means they were split.
+  it('has exactly the published objective count', async () => {
+    // The reasoning behind the original 20-80 bound: EX200 publishes dozens of
+    // bullets across ~10 areas, so far fewer means bullets were merged and far
+    // more means they were split. But a range that wide does not actually catch
+    // a merge - collapsing two Table 1 rows into one entry takes the count to
+    // 67 and stays inside it. The exact count does catch it.
+    //
+    // 68 is the RHCSA 9 Cert Guide Table 1 row count, section by section:
+    // 11+4+10+6+6+6+4+4+9+8. Counted independently twice.
     const set = await loadObjectives(`${ROOT}objectives.yaml`)
-    expect(set.objectives.length).toBeGreaterThanOrEqual(20)
-    expect(set.objectives.length).toBeLessThanOrEqual(80)
+    expect(set.objectives.length).toBe(68)
   })
 
   it('covers every area the exam is organised around', async () => {
@@ -67,15 +72,26 @@ function normalizeText(text: string): string {
   return text
     .toLowerCase()
     .replace(/\s+/g, ' ')
-    .trim()
     .replace(/-/g, '')
     .replace(/[.,;:!?]+$/, '')
+    .trim()
 }
 
 describe('content/objectives-rhel10.yaml', () => {
   it('loads and is tagged rhel10', async () => {
     const set = await loadObjectives(`${ROOT}objectives-rhel10.yaml`)
     expect(set.version).toBe('rhel10')
+  })
+
+  it('has exactly the published objective count', async () => {
+    // Same reasoning as the rhel9 count above: an exact count is what catches a
+    // merged or split bullet, which a 20-80 range does not.
+    //
+    // 62 is Red Hat's published EX200 bullet count, section by section:
+    // 11+4+4+10+6+5+6+4+4+8. It is also this file's row count, which is the
+    // point - the two agree only if nothing was merged, split or dropped.
+    const set = await loadObjectives(`${ROOT}objectives-rhel10.yaml`)
+    expect(set.objectives.length).toBe(62)
   })
 
   it('drops containers and adds flatpak, enumerating risk R2', async () => {

@@ -17,7 +17,7 @@
 # Red Hat's page are flagged `# gone in RHEL 10` so the R2 delta is visible
 # from this file too; see content/objectives-rhel10.yaml for the full delta.
 version: rhel9
-source: "RHCSA 9 Cert Guide 'Table 1 Coverage of RHCSA Objectives', PDF pages 39-45 (read visually with the Read tool; cross-checked against the PDF text layer). Red Hat's published EX200 objectives page was reachable on 2026-08-30 but now states the RHEL 10 objective set rather than RHEL 9's, so it could not arbitrate RHEL 9 wording; text is the book's throughout. Chapters for 'Manage default file permissions' and 'Manage SELinux port labels' come from the Chapter 7 and Chapter 22 openers, because Table 1 leaves the chapter cell of both rows blank."
+source: "RHCSA 9 Cert Guide 'Table 1 Coverage of RHCSA Objectives', PDF pages 39-45. Contrary to the plan this table is machine-readable text, not a rendered image: it was transcribed from the PDF text layer (pdftotext -layout, PDF pages 39-45) and then visually verified with the Read tool on PDF pages 39, 40, 44 and 45. The rows on PDF pages 41-43 rest on the text layer alone, corroborated by Red Hat's published page where those bullets survive into RHEL 10. Red Hat's published EX200 objectives page was reachable on 2026-08-30 but now states the RHEL 10 objective set rather than RHEL 9's, so it could not arbitrate RHEL 9 wording; text is the book's throughout. Chapters for 'Manage default file permissions' and 'Manage SELinux port labels' come from the Chapter 7 and Chapter 22 openers, because Table 1 leaves the chapter cell of both rows blank."
 objectives:
   # --- Understand and use essential tools ---
   - id: tools.shell.prompt
@@ -39,7 +39,7 @@ objectives:
   - id: tools.archive.tar
     text: "Archive, compress, unpack, and uncompress files using tar, star, gzip, and bzip2"
     chapters: [3]
-  - id: tools.editor.vim
+  - id: tools.editor.text-files
     text: "Create and edit text files"
     chapters: [4]
   - id: files.manage.copy-move
@@ -94,10 +94,10 @@ objectives:
   - id: sys.logs.persistent-journal
     text: "Preserve system journals"
     chapters: [13]
-  - id: systemd.services.network
+  - id: net.services.status
     text: "Start, stop, and check the status of network services"
     chapters: [8]
-  - id: net.ssh.transfer
+  - id: tools.ssh.transfer
     text: "Securely transfer files between systems"
     chapters: [5]
 
