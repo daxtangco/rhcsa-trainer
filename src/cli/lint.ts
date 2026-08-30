@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
 import { loadBank, type Bank } from '../engine/content/bank.ts'
 import { ContentError } from '../engine/content/errors.ts'
@@ -275,6 +275,19 @@ function isEnoent(e: unknown): boolean {
   return code === 'ENOENT'
 }
 
+/**
+ * A regular file at this exact path. `stat` rather than `access`, because a
+ * *directory* named `setup.sh` is not a script the loader can read, and `access`
+ * would say it is there.
+ */
+async function isFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile()
+  } catch {
+    return false
+  }
+}
+
 async function scanFixtureDir(dir: string): Promise<FixtureDir> {
   let entries: Dirent[]
   try {
@@ -333,6 +346,22 @@ async function checkFixtureFloors(
     if (!graders.has(join(task.dir, 'grade.sh'))) {
       problems.push(
         `${where}: ${task.id} is in the bank but has no grade.sh, so nothing about this task was checked`,
+      )
+    }
+
+    // `setup.sh` is required by nothing else — not `loadTask`, not `loadBank`, so
+    // the bank loads happily without it. `loadTaskScripts` reads it with a bare
+    // `readFile` and no `.catch`, unlike the `readdir(dir).catch(() => [])` eleven
+    // lines below it, so its absence rejects rather than being swallowed: the lab
+    // cannot start and `rhcsa validate` cannot run. That makes this a late failure
+    // rather than a silent one, and it is checked here anyway for one reason — this
+    // command is the only gate a checkout with no ISO can run, and
+    // `docs/exit-criterion.md` sends the reader here before a VM exists. A green
+    // result on a task that cannot start is a false green on the bank, which is the
+    // third failure direction this project counts.
+    if (!(await isFile(join(task.dir, 'setup.sh')))) {
+      problems.push(
+        `${where}: ${task.id} has no setup.sh, so the lab cannot be started and validate cannot run it`,
       )
     }
 
@@ -432,28 +461,46 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
     )
   }
 
-  // The floors are per-task, so a root the walk found no graders in has no task to
-  // iterate — and that case already has its own single, actionable message above.
-  // Loading the bank there would bury it under YAML-shaped noise about a directory
-  // the operator most likely mistyped.
-  if (graders.length > 0) {
-    let bank: Bank | undefined
-    try {
-      bank = await loadBank(root)
-    } catch (e) {
-      // "The floors could not be checked" is itself a problem. Reporting it as a
-      // note, or not at all, would reintroduce the defect this round closes one
-      // level up: the gate exiting 0 having skipped the check.
-      //
-      // The header checks below still run, which is the point of the split
-      // documented on `taskDirOf`: a YAML error must not take the script lint with
-      // it. Only the derived rules are skipped, and skipping them is loud.
+  // The floors run here, outside any test on `graders`, and that placement is the
+  // whole point of them.
+  //
+  // `graders.length` is a **walk result**. `bank.tasks` is the independent record of
+  // what should exist, and it is the only input every rule in `checkFixtureFloors`
+  // reads. So the grader count is not a precondition of the floors — it is one of
+  // the things they check, via the `grade.sh` rule. Gating them on it inverted that:
+  // a bank still declaring five tasks with every `grade.sh` deleted found zero
+  // graders, so the rule that exists to report exactly that never ran. Under
+  // `--allow-empty`, which makes zero graders a non-error, the whole command then
+  // exited 0 on a bank with no graders and no anti-solutions at all.
+  //
+  // An earlier version of this comment claimed "a root the walk found no graders in
+  // has no task to iterate". That is false — it infers a property of the bank from a
+  // result of the walk, which is the reasoning error every rule below exists to
+  // close. It is recorded here rather than deleted because the short-circuit it
+  // defended is the obvious simplification for the next reader to reach for.
+  let bank: Bank | undefined
+  try {
+    bank = await loadBank(root)
+  } catch (e) {
+    // "The floors could not be checked" is itself a problem, for the same reason as
+    // the guard above: a gate exiting 0 having skipped its checks.
+    //
+    // Reported only when the walk found a grader, and that condition is about the
+    // *message*, not about the rules. At zero graders the guard above already
+    // carries the single actionable line — and when `--allow-empty` says an
+    // unauthored root is expected, an unloadable bank is that assertion being true
+    // rather than a defect. With a grader present the bank is a real bank, so a bank
+    // that will not load is a problem no flag suppresses.
+    //
+    // The header checks below still run either way, which is the split documented on
+    // `taskDirOf`: a YAML error must not take the script lint down with it.
+    if (graders.length > 0) {
       const detail =
         e instanceof ContentError ? e.problems.join('; ') : e instanceof Error ? e.message : String(e)
       problems.push(`${root}: the bank did not load, so the per-task fixture floors were not checked — ${detail}`)
     }
-    if (bank !== undefined) await checkFixtureFloors(bank, new Set(graders), rel, problems)
   }
+  if (bank !== undefined) await checkFixtureFloors(bank, new Set(graders), rel, problems)
 
   for (const grader of graders) {
     emittedByTask.set(taskDirOf(grader), new Set(checkpointIds(text.get(grader) ?? '')))

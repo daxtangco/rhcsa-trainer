@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -53,10 +53,14 @@ async function plant(root: string, mutate: (text: string) => string): Promise<vo
   await writeFile(file, after, 'utf8')
 }
 
-async function lint(root: string) {
+async function lint(root: string, ...extra: string[]) {
   const c = capture()
-  const code = await run(['lint', '--content', root], c.io)
+  const code = await run(['lint', '--content', root, ...extra], c.io)
   return { code, out: c.out.join('\n'), err: c.err.join('\n') }
+}
+
+function countProblems(err: string, pattern: RegExp): number {
+  return err.split('\n').filter((l) => l.startsWith('problem:') && pattern.test(l)).length
 }
 
 describe('rhcsa lint on the shipped bank', () => {
@@ -415,6 +419,50 @@ describe('rhcsa lint enforces the fixture floors it derives from the bank', () =
     expect(r.err).not.toMatch(/no sibling grade\.sh/)
   })
 
+  it('reports a task with no setup.sh, which nothing else validates', async () => {
+    // No task loader requires `setup.sh`, so the bank loads happily without it.
+    // `loadTaskScripts` reads it with a bare `readFile` and no `.catch`, unlike the
+    // `readdir(dir).catch(() => [])` eleven lines below it — so the failure is late
+    // rather than swallowed: the lab cannot start and validate cannot run. Checked
+    // here because this command is the only gate a checkout with no ISO can run,
+    // and docs/exit-criterion.md sends the reader here before a VM exists.
+    const root = await bankCopy()
+    await rm(join(root, STORAGE, 'setup.sh'))
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/014-grow-home-lv has no setup\.sh/)
+  })
+
+  it('reports a setup.sh that is a directory rather than a file', async () => {
+    // `stat().isFile()` rather than `access()`, because a directory at that path is
+    // not a script `readFile` can load and `access` would report it as present.
+    const root = await bankCopy()
+    await rm(join(root, STORAGE, 'setup.sh'))
+    await mkdir(join(root, STORAGE, 'setup.sh'))
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/014-grow-home-lv has no setup\.sh/)
+  })
+
+  it('reports a fixture directory it cannot read, as distinct from one that is absent', async () => {
+    // The `unreadable` arm, reached without a permissions fixture and without sudo:
+    // a regular *file* named `antisolutions` makes readdir fail ENOTDIR, not ENOENT.
+    // It fails closed either way, so this is not a false-green guard — it is the one
+    // arm of scanFixtureDir that had no test, in the function this task hardened.
+    const root = await bankCopy()
+    await rm(join(root, STORAGE, 'antisolutions'), { recursive: true })
+    await writeFile(join(root, STORAGE, 'antisolutions'), 'not a directory\n', 'utf8')
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/antisolutions\/ could not be read \(.*ENOTDIR/)
+    // Distinct from the absent message, so the operator is not sent looking for a
+    // misspelling when the problem is the entry's type.
+    expect(r.err).not.toMatch(/antisolutions\/ is missing/)
+  })
+
   it('reports a grader no bank task owns, so neither half rests on the other', async () => {
     // `bank.tasks` is itself assembled from a walk for task.yaml, so iterating it
     // closes the missing-expectation hole one way only. Remove a task.yaml and
@@ -442,6 +490,108 @@ describe('rhcsa lint enforces the fixture floors it derives from the bank', () =
     expect(r.err).toMatch(/the bank did not load, so the per-task fixture floors were not checked/)
     expect(r.out).toMatch(/graders checked: 5/)
     expect(r.out).toMatch(/scripts with headers: 21/)
+  })
+})
+
+describe('rhcsa lint runs the bank-derived rules whatever the walk found', () => {
+  // The rules in the block above are derived from `bank.tasks`. The grader count is
+  // a *walk result*, and for one commit the floors sat behind `if (graders.length >
+  // 0)` — so a bank still declaring five tasks with every grade.sh deleted found
+  // zero graders and never reached the rule that exists to report exactly that.
+  // With `--allow-empty`, which is the flag that makes zero graders a non-error, the
+  // command exited 0 on that bank.
+  //
+  // That is this task's recurring defect in a new position. The other four were the
+  // gate not looking at the thing; this one was the gate not running, behind a
+  // precondition computed from one of the things it validates. So the count is
+  // checked *by* the rules and is not allowed to gate them, and these tests pin the
+  // placement rather than the logic — the logic was never wrong.
+
+  /** Five tasks still declared in the bank; every grade.sh and every antisolutions/ gone. */
+  async function strippedBank(): Promise<string> {
+    const root = await bankCopy()
+    const entries = await readdir(join(root, 'tasks'), { recursive: true, withFileTypes: true })
+
+    let graders = 0
+    for (const e of entries) {
+      if (e.isFile() && e.name === 'grade.sh') {
+        await rm(join(e.parentPath, e.name))
+        graders += 1
+      }
+    }
+    for (const e of entries) {
+      if (e.isDirectory() && e.name === 'antisolutions') {
+        await rm(join(e.parentPath, e.name), { recursive: true })
+      }
+    }
+    // The plant has to have landed on all five, or the counts below prove nothing.
+    expect(graders).toBe(5)
+    return root
+  }
+
+  it('fires the grade.sh rule five times at zero graders, under --allow-empty', async () => {
+    const root = await strippedBank()
+    const r = await lint(root, '--allow-empty')
+
+    expect(r.code).toBe(1)
+    expect(countProblems(r.err, /is in the bank but has no grade\.sh/)).toBe(5)
+    expect(countProblems(r.err, /antisolutions\/ is missing/)).toBe(5)
+    // The walk really did find nothing, which is what made this reachable: the
+    // rules fired from `bank.tasks` alone.
+    expect(r.out).toMatch(/graders checked: 0/)
+  })
+
+  it('fires them at zero graders without the flag too, so the flag is not the axis', async () => {
+    // Both axes, because `--allow-empty` was only the thing that made the exit code
+    // 0. The unreachability was there without it, and a fix that worked only under
+    // the flag would leave the placement bug intact.
+    const root = await strippedBank()
+    const r = await lint(root)
+
+    expect(r.code).toBe(1)
+    expect(countProblems(r.err, /is in the bank but has no grade\.sh/)).toBe(5)
+    expect(r.err).toMatch(/no grade\.sh found, so nothing was checked/)
+  })
+
+  it('fires the setup.sh rule at zero graders as well, with and without the flag', async () => {
+    // setup.sh inherits the placement fix, and both axes are pinned because the flag
+    // is now a live axis for every bank-derived rule rather than for the one guard
+    // it was written against.
+    const root = await strippedBank()
+    await rm(join(root, 'tasks/storage/014-grow-home-lv/setup.sh'))
+
+    for (const args of [[], ['--allow-empty']]) {
+      const r = await lint(root, ...args)
+      expect(r.code, `args: ${JSON.stringify(args)}`).toBe(1)
+      expect(r.err).toMatch(/014-grow-home-lv has no setup\.sh/)
+    }
+  })
+
+  it('still exits 0 under --allow-empty on a root with no bank at all', async () => {
+    // What the flag was added for, and it has to keep working: deliberately linting
+    // a root before any task is authored. There is no bank to load and no task to
+    // iterate, so no rule has anything to say — which is a different fact from the
+    // case above, where five tasks were declared.
+    const dir = await mkdtemp(join(tmpdir(), 'rhcsa-lint-nobank-'))
+    temps.push(dir)
+    await mkdir(join(dir, 'tasks'), { recursive: true })
+
+    const r = await lint(dir, '--allow-empty')
+    expect(r.err).toBe('')
+    expect(r.code).toBe(0)
+  })
+
+  it('does not let --allow-empty excuse a bank that will not load when graders exist', async () => {
+    // The narrow half of the message rule: at zero graders an unloadable bank is the
+    // flag's assertion being true, but with graders present the bank is a real bank
+    // and no flag suppresses its failure to load. Widening that is the obvious wrong
+    // turn, so it is pinned.
+    const root = await bankCopy()
+    await writeFile(join(root, 'objectives.yaml'), 'this: [is not\n  valid: yaml\n', 'utf8')
+
+    const r = await lint(root, '--allow-empty')
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/the bank did not load, so the per-task fixture floors were not checked/)
   })
 })
 
