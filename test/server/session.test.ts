@@ -201,6 +201,57 @@ describe('countCheckpoints', () => {
     expect(countCheckpoints('y=$(echo a)#tag; ck real-id "$y" 0\n')).toBe(1)
   })
 
+  it('honours an escaped quote inside a run that was already open when the line started', () => {
+    // R1 re-opened through the newline, and the reason it survived a whole round:
+    // the walk computed `escapes` two different ways at the two call sites of
+    // `closingQuote`. The main loop passed `ch === '"' || ansiC`; the carried-run
+    // prologue passed `ansiC` alone, which is false for a `"…"`. So a double-quoted
+    // run that spanned lines paired its quotes positionally, the walk stayed
+    // *inside* the string, and every remaining line of the grader was discarded -
+    // `expectedTotal` toward 0, `incomplete` false, and a grader that died on its
+    // first command reporting the lab passed. Nothing in the suite told the defect
+    // from the fix in either direction, and the six pinned counts were identical
+    // both ways, which is why this test exists.
+    expect(countCheckpoints('x="a\nb\\"c"\nck real-id "d" 0\n')).toBe(1)
+    expect(countCheckpoints('echo "a\nb\\"" ; ck real-id "d" 0\n')).toBe(1)
+    // Three lines and two checkpoints, so a partial fix that recovers only the
+    // line after the run does not pass.
+    expect(countCheckpoints('msg="a\nb \\" c\nd"\nck real-id "d" 0\nck two-id "d" 0\n')).toBe(2)
+    // The unbounded half: mispairing also queued a phantom heredoc from a `<<` the
+    // run should have hidden.
+    expect(
+      countCheckpoints('x="a\nb\\"c"\ncat <<EOF\nbody\nEOF\nck real-id "d" 0\nck two-id "d" 0\n'),
+    ).toBe(2)
+    // The asymmetry survives the newline, which is why the fix tests the quote
+    // character rather than passing `true`. A carried plain single-quoted run
+    // processes no escapes, so `b\'` closes it and the `ck` after it counts.
+    expect(countCheckpoints("x='a\nb\\'; ck real-id \"d\" 0\n")).toBe(1)
+    // And `$'…'` still honours it, as it did before.
+    expect(countCheckpoints("x=$'a\nb\\'c'\nck real-id \"d\" 0\n")).toBe(1)
+  })
+
+  it('lets an unterminated quote outrank a pending heredoc body, because bash does', () => {
+    // The ordering this walk asserted for a round, in a docstring, backwards.
+    // Measured: on `cat <<EOF; x="a` / `ck inside "d" 0` / `b"` / `EOF` /
+    // `ck real-id "d" 0` bash emits `real-id` and *not* `inside`, and printing `$x`
+    // afterwards gives `a\nck inside d 0\nb` - so bash finishes the unterminated
+    // word across the newline first and only then gathers the body, which here
+    // starts at `EOF` and is empty. Checking the pending body first swallowed the
+    // rest of the file instead: a silent fail-open.
+    expect(countCheckpoints('cat <<EOF; x="a\nb"\nEOF\nck real-id "d" 0\n')).toBe(1)
+    expect(countCheckpoints('cat <<EOF; x="a\nck inside "d" 0\nb"\nEOF\nck real-id "d" 0\n')).toBe(1)
+    expect(countCheckpoints("cat <<EOF; x='a\nb'\nEOF\nck real-id \"d\" 0\n")).toBe(1)
+    // The pre-existing member of the family, and the fail-*closed* one: the
+    // delimiter word itself falls inside the run, so bash absorbs `EOF` into the
+    // assignment, never terminates the body and emits nothing. The counter used to
+    // declare one. The same condition closed an over-count and four under-counts.
+    expect(countCheckpoints('cat <<EOF; x="a\nEOF\nb"\nck real-id "d" 0\n')).toBe(0)
+    // With no run open the body still wins and its `ck` is still suppressed, which
+    // is the rule the new condition must not have broken.
+    expect(countCheckpoints('cat <<EOF\nck phantom "d" 0\nEOF\nck real-id "d" 0\n')).toBe(1)
+    expect(countCheckpoints('cat <<EOF; x="a"\nck phantom "d" 0\nEOF\nck real-id "d" 0\n')).toBe(1)
+  })
+
   it('does not lose a ck after an escaped quote earlier on the line', () => {
     // The fail-open regression round 3 introduced, and the one that matters most
     // on this branch. The quote walk paired `"` characters positionally, which

@@ -519,6 +519,128 @@ export const ORACLE_CASES: OracleCase[] = [
     name: 'hd-delim-after-space',
     script: sh('cat << EOF', 'ck phantom "d" 0', 'EOF', 'ck real-id "d" 0'),
   },
+
+  // ------------------------------ an escaped quote inside a run that was already
+  // ------------------------------ open when the line started (R1, re-opened)
+  //
+  // The round that carried quote state across the newline computed `escapes` two
+  // different ways at the two call sites of one helper: the main loop passed
+  // `ch === '"' || ansiC`, the carried-run prologue passed `ansiC` alone. So a
+  // `"…"` that spanned lines paired its quotes *positionally* — exactly the defect
+  // whose fix `closingQuote`'s own docstring describes, arriving through the
+  // newline instead of within a line. The direction is the bad one: the walk stays
+  // **inside** the string, so `expectedTotal` collapses toward 0, `incomplete`
+  // goes false, and a grader that died on its first command reports the lab passed.
+  // Not one of the 349 tests told the defect from the fix, in either direction,
+  // and the six pinned counts were byte-identical both ways. Hence these rows.
+  {
+    name: 'carried-dq-escaped-quote',
+    script: sh('x="a', String.raw`b\"c"`, 'ck real-id "d" 0'),
+  },
+  {
+    name: 'carried-dq-escaped-quote-then-ck-same-line',
+    script: sh('echo "a', String.raw`b\"" ; ck real-id "d" 0`),
+  },
+  {
+    name: 'carried-dq-escaped-quote-then-ck-next-line',
+    script: sh('echo "a', String.raw`b\""`, 'ck real-id "d" 0'),
+  },
+  {
+    // The one line of this family that could plausibly be written by a grader
+    // author: a `grep` pattern spanning lines and quoting something inside itself.
+    // An `awk` program written with `"` instead of `'` is the same shape, and awk
+    // programs routinely contain `\"` — which is how close this was to reachable.
+    name: 'carried-dq-escaped-quote-grep-shape',
+    script: sh('grep -q "Listen 82', String.raw`and \"quoted\"" /etc/hosts; ck listen-set "d" $?`),
+  },
+  {
+    name: 'carried-dq-escaped-quote-three-lines',
+    script: sh('msg="a', String.raw`b \" c`, 'd"', 'ck real-id "d" 0', 'ck two-id "d" 0'),
+  },
+  {
+    // The unbounded half again: mispairing the carried quote also queued a phantom
+    // heredoc from a `<<` the run should have hidden, so two checkpoints were lost.
+    name: 'carried-dq-escaped-quote-then-heredoc',
+    script: sh(
+      'x="a',
+      String.raw`b\"c"`,
+      'cat <<EOF',
+      'body',
+      'EOF',
+      'ck real-id "d" 0',
+      'ck two-id "d" 0',
+    ),
+  },
+  {
+    // Control, and the reason the fix is a `quote === '"'` test rather than `true`:
+    // a carried **plain** single-quoted run still processes no escapes, so `b\'`
+    // closes it. This is `'it\'`'s asymmetry surviving the newline; honouring `\'`
+    // here would lose the `ck` after it, which is R1 in the other direction.
+    name: 'carried-sq-keeps-backslash',
+    script: sh(String.raw`x='a`, String.raw`b\'; ck real-id "d" 0`),
+  },
+  {
+    // Control: `$'…'` carried across the newline *does* honour `\'`, and did before
+    // the fix too, because `ansiC` was the one flag being passed.
+    name: 'carried-ansi-c-escaped-quote',
+    script: sh(String.raw`x=$'a`, String.raw`b\'c'`, 'ck real-id "d" 0'),
+  },
+  {
+    // Control: an escaped backslash is not an escaped quote, so the run closes at
+    // the `"`. Agreed before and after; it is here so a future `escapes` change
+    // that swallows `\\` is caught.
+    name: 'carried-dq-escaped-backslash',
+    script: sh('x="a', String.raw`b\\"`, 'ck real-id "d" 0'),
+  },
+
+  // ------------------------- a heredoc opener and an unterminated quote on the
+  // ------------------------- same line: which one claims the next line
+  //
+  // Measured, and the opposite of what this walk's docstring asserted for a round:
+  // bash finishes the unterminated **word** across the newline first and only then
+  // gathers the heredoc body. On `cat <<EOF; x="a` / `ck inside "d" 0` / `b"` /
+  // `EOF` / `ck real-id "d" 0` bash emits `real-id` and not `inside`, and printing
+  // `$x` afterwards gives `a⏎ck inside d 0⏎b` — the body began at `EOF` and was
+  // empty. Checking the pending body first therefore swallowed the rest of the
+  // file: a silent fail-open. The guard now gives the carried run precedence.
+  {
+    name: 'heredoc-opener-with-open-quote-same-line',
+    script: sh('cat <<EOF; x="a', 'b"', 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    // The docstring's own example, and the discriminating one: `ck inside` sits
+    // where the body would be if the body won. bash never runs it.
+    name: 'heredoc-opener-with-open-quote-and-ck-between',
+    script: sh('cat <<EOF; x="a', 'ck inside "d" 0', 'b"', 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    name: 'heredoc-opener-with-open-quote-and-operator',
+    script: sh('cat <<EOF && x="a', 'b"', 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    name: 'heredoc-opener-with-open-single-quote',
+    script: sh(`cat <<EOF; x='a`, `b'`, 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    // The pre-existing member of the family, and the one that was **fail-closed**:
+    // the delimiter word itself falls inside the quoted run, so bash absorbs `EOF`
+    // into the assignment, never terminates the body, prints the rest of the file
+    // and emits nothing. The counter used to declare `real-id`. Both now say
+    // nothing, so the same condition closed an over-count and four under-counts.
+    name: 'heredoc-delimiter-swallowed-by-open-quote',
+    script: sh('cat <<EOF; x="a', 'EOF', 'b"', 'ck real-id "d" 0'),
+  },
+  {
+    // Control: with no run open, the body still wins and its `ck` is still
+    // suppressed. This is the rule the new condition must not have broken.
+    name: 'heredoc-body-suppressed-with-no-open-quote',
+    script: sh('cat <<EOF', 'ck phantom "d" 0', 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    // Control: a quote that *closes* on the opener line leaves the body in charge.
+    name: 'heredoc-body-suppressed-after-closed-quote',
+    script: sh('cat <<EOF; x="a"', 'ck phantom "d" 0', 'EOF', 'ck real-id "d" 0'),
+  },
 ]
 
 /**
@@ -576,11 +698,67 @@ export const ORACLE_DIVERGENCES: OracleDivergence[] = [
     why:
       'A `\\` line continuation that falls between the `ck` token and its id puts ' +
       'the id on the next line, and this walk has no lookahead: it matches an id ' +
-      'only on the line the token is on. A continuation *before* the `ck` counts ' +
-      'correctly, and so does one after the id, which is where every continuation ' +
-      'in the bank falls — measured. Fixing it means joining continued lines ' +
-      'before scanning, which changes what every other rule sees, and this is the ' +
-      'last round before the branch review. Silent fail-open, unreachable today.',
+      'only on the line the token is on. A continuation *after* the id counts ' +
+      'correctly, which is where all ten continuations in the bank fall — measured. ' +
+      'One *before* the `ck` counts correctly only when it ends a complete word ' +
+      '(`: \\` and `test -f /etc/hosts \\` both agree); when it glues the previous ' +
+      'word onto the `ck` it does not, and that is the separate `over` entry below. ' +
+      'Fixing either means joining continued lines before scanning, which changes ' +
+      'what every other rule sees. Silent fail-open, unreachable today.',
+  },
+  {
+    // The shape the entry above used to claim counted correctly. Split out rather
+    // than folded in, because the direction is the opposite one.
+    name: 'continuation-glues-word-onto-ck',
+    script: sh('echo a\\', 'ck real-id "d" 0'),
+    direction: 'over',
+    bashIds: [],
+    counterIds: ['real-id'],
+    why:
+      'A trailing `\\` joins the two lines before bash tokenises them, so ' +
+      '`echo a\\` + `ck real-id …` is the single command `echo ack real-id "d" 0`: ' +
+      'bash prints a word and emits no checkpoint at all. This walk sees a fresh ' +
+      'line beginning with `ck` and declares one. `true \\` + `ck real-id` is the ' +
+      'same miss with `ck` becoming an argument rather than part of a word. ' +
+      'Fail-closed, so the student gets a loud false fail rather than a false pass, ' +
+      'and pre-existing rather than introduced. Measured absent from the bank: all ' +
+      'ten trailing-`\\` lines in the counted text fall after a `ck` id, inside ' +
+      '`ck_fail` and `printf` argument lists.',
+  },
+  {
+    name: 'deprecated-arith-read-as-heredoc',
+    script: sh('echo $[1 << 2]', 'ck real-id "d" 0'),
+    direction: 'under',
+    bashIds: ['real-id'],
+    counterIds: [],
+    why:
+      "`$[ … ]` is bash's pre-2.0 arithmetic form, and the `arith` guard that keeps " +
+      'a shift operator from looking like a heredoc opener recognises `$((` and ' +
+      '`((` only. So `1 << 2` inside `$[ ]` is read as `<<` with the delimiter ' +
+      '`2]`, queueing a body whose terminator never arrives and discarding every ' +
+      'remaining line of the grader. **This contradicts the previous round\'s ' +
+      'argument for widening the delimiter parser** — that widening could only move ' +
+      'shapes in the fail-closed direction. It moved this one open, and silently. ' +
+      'Not closed here because the exception granted for this round covers two ' +
+      'named regressions only; `$[ ]` has been deprecated since bash 2 and measured ' +
+      'absent from `content/`, so the reachability is the lowest in this list.',
+  },
+  {
+    name: 'subst-depth-resets-across-newline',
+    script: sh(`x=$(echo 'a`, `b'; ck phantom "d" 0)`, 'ck real-id "d" 0'),
+    direction: 'over',
+    bashIds: ['real-id'],
+    counterIds: ['phantom', 'real-id'],
+    why:
+      'The `$( )` and `(( ))` nesting depths are locals of `scanLine` and reset on ' +
+      'every line, while the open quote now survives the newline: two pieces of ' +
+      'lexical state with different lifetimes. So a substitution that spans lines ' +
+      'loses its depth, and a `ck` on the closing line is declared even though its ' +
+      'JSONL goes into the captured output and the harness never sees it. ' +
+      'Fail-closed. Closing it means giving `subst` and `arith` the same lifetime ' +
+      'as `quoted`, which is the right shape and is exactly the kind of ' +
+      'multi-line state change this round is not permitted to make. Measured absent ' +
+      'from the bank: no multi-line `$( )` in the counted text.',
   },
   {
     name: 'brace-list-containing-ck',

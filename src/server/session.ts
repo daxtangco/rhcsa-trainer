@@ -251,8 +251,14 @@ function heredocDelimiter(slice: string): PendingHeredoc | undefined {
  * `ORACLE_DIVERGENCES` with measured pairs; the largest is `CK_CALL`'s anchor set,
  * which does not know the positions where a command may still begin (`! ck …`,
  * `LC_ALL=C ck …`, `time ck …`, `eval 'ck …'`, and a `\` continuation that
- * separates `ck` from its id). Every one of those is a silent **under**-count, and
- * none is reachable in the bank today.
+ * separates `ck` from its id). Every one of those is a silent **under**-count.
+ *
+ * Rule 6 also left a seam worth naming, because it is the one place this walk is
+ * now inconsistent with itself: `quoted` crosses the newline while `subst` and
+ * `arith` are `scanLine` locals that reset on every line, so the pieces of lexical
+ * state have different lifetimes. `subst-depth-resets-across-newline` pins what
+ * that costs. Nothing in either list is reachable in the bank today, which is a
+ * statement about five graders rather than a guarantee about the next one.
  */
 function scanLine(
   line: string,
@@ -279,7 +285,11 @@ function scanLine(
   if (carried !== undefined) {
     // The line opens inside a quoted run, so its leading part is string content:
     // it declares no checkpoint and — the unbounded half — opens no heredoc.
-    const close = closingQuote(line, 0, carried.quote, carried.ansiC)
+    // `escapes` has to be computed the same way the main-loop call site below
+    // computes it. Passing `carried.ansiC` alone was R1 re-opened through the
+    // newline: a carried `"…"` pairs `\"` positionally, the walk stays *inside*
+    // the string, and every remaining line of the grader is discarded.
+    const close = closingQuote(line, 0, carried.quote, carried.quote === '"' || carried.ansiC)
     if (close === -1) return { code: '', heredocs, open: carried }
     // The delimiters stay for the same reason they do below: so nothing on either
     // side of the run gets glued together.
@@ -439,15 +449,20 @@ export function checkpointIds(gradeScript: string): string[] {
   const ids = new Set<string>()
   const pending: PendingHeredoc[] = []
   /**
-   * The quoted run the previous line ended inside. It survives a heredoc body in
-   * between, which is bash's own order: `cat <<EOF; x="a` reads the body first and
-   * only then keeps reading the string.
+   * The quoted run the previous line ended inside. It **outranks** a pending
+   * heredoc body, which is bash's own order and the opposite of what this
+   * docstring claimed for one round. Measured on
+   * `cat <<EOF; x="a` / `ck inside "d" 0` / `b"` / `EOF` / `ck real-id "d" 0`:
+   * bash emits `real-id` and not `inside`, and printing `$x` afterwards gives
+   * `a⏎ck inside d 0⏎b` — so bash finishes the unterminated *word* across the
+   * newline first and only then gathers the body, which here starts at `EOF` and
+   * is empty. Checking the body first swallowed the rest of the file instead.
    */
   let quoted: OpenQuote | undefined
 
   for (const raw of gradeScript.split('\n')) {
     const open = pending.at(0)
-    if (open !== undefined) {
+    if (open !== undefined && quoted === undefined) {
       // Bash's terminator rule, which `raw.trim() === delim` was not: a plain
       // `<<EOF` body ends only at a line *equal* to the delimiter, `<<-EOF`
       // strips leading tabs and never spaces, and a trailing space never
