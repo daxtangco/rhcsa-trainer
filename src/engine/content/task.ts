@@ -7,9 +7,41 @@ export type TaskScope = 'exam-objective' | 'instrumental'
 export type TaskWeight = 'low' | 'medium' | 'high'
 export type TaskTransport = 'ssh' | 'vmrun'
 
-const SCOPES: readonly string[] = ['exam-objective', 'instrumental']
-const WEIGHTS: readonly string[] = ['low', 'medium', 'high']
-const TRANSPORTS: readonly string[] = ['ssh', 'vmrun']
+/**
+ * The three enumerations `task.yaml` is validated against, keyed by the union each
+ * one enumerates rather than typed `readonly string[]`.
+ *
+ * The type was the defect, not the contents. `readonly string[]` cannot be checked
+ * against its union, so `SCOPES.includes(raw.scope as string)` was a membership
+ * test against a list nothing tied to `TaskScope`, and the `as TaskScope` that
+ * followed it was load-bearing and unchecked — `includes` on a `string[]` narrows
+ * nothing. Adding a member to any of these three types compiled clean while the
+ * loader rejected every task declaring it, with a message naming the old list.
+ *
+ * **`TRANSPORTS` is keyed by `TaskTransport`, not by `TransportKind`, and that is
+ * the whole point of writing it out.** `TransportKind` (`src/engine/vm/config.ts`)
+ * has a third member, `fake`, which is the in-process test double. A `TRANSPORTS`
+ * made exhaustive against *that* type would accept `transport: fake` in a shipped
+ * `task.yaml` — a task whose grading runs against a stub that agrees with
+ * everything, which is a false pass by construction and the exact class of defect
+ * this fix round exists to close. The two unions are deliberately different and
+ * this record must follow the narrower one.
+ */
+const SCOPES: Record<TaskScope, true> = { 'exam-objective': true, instrumental: true }
+const WEIGHTS: Record<TaskWeight, true> = { low: true, medium: true, high: true }
+const TRANSPORTS: Record<TaskTransport, true> = { ssh: true, vmrun: true }
+
+function isScope(v: unknown): v is TaskScope {
+  return typeof v === 'string' && Object.hasOwn(SCOPES, v)
+}
+
+function isWeight(v: unknown): v is TaskWeight {
+  return typeof v === 'string' && Object.hasOwn(WEIGHTS, v)
+}
+
+function isTransport(v: unknown): v is TaskTransport {
+  return typeof v === 'string' && Object.hasOwn(TRANSPORTS, v)
+}
 
 /**
  * Spec section 4.1's VM design has three spare disk slots; more is
@@ -93,22 +125,24 @@ export function parseTaskSpec(raw: unknown, dir: string): TaskSpec {
     problems,
   )
 
-  const scope = SCOPES.includes(raw.scope as string) ? (raw.scope as TaskScope) : 'exam-objective'
-  if (!SCOPES.includes(raw.scope as string)) {
-    problems.push(`scope must be one of: ${SCOPES.join(', ')}`)
+  // The predicate is asked once and its answer decides both the value and the
+  // problem, so the fallback and the message can no longer disagree about whether
+  // the input was acceptable. Listing the accepted values still reads them off the
+  // record, so a member added to the type appears in the message for free.
+  const scope: TaskScope = isScope(raw.scope) ? raw.scope : 'exam-objective'
+  if (!isScope(raw.scope)) {
+    problems.push(`scope must be one of: ${Object.keys(SCOPES).join(', ')}`)
   }
 
-  const weight = WEIGHTS.includes(raw.weight as string) ? (raw.weight as TaskWeight) : 'medium'
-  if (!WEIGHTS.includes(raw.weight as string)) {
-    problems.push(`weight must be one of: ${WEIGHTS.join(', ')}`)
+  const weight: TaskWeight = isWeight(raw.weight) ? raw.weight : 'medium'
+  if (!isWeight(raw.weight)) {
+    problems.push(`weight must be one of: ${Object.keys(WEIGHTS).join(', ')}`)
   }
 
   const rawTransport = raw.transport ?? 'ssh'
-  const transport = TRANSPORTS.includes(rawTransport as string)
-    ? (rawTransport as TaskTransport)
-    : 'ssh'
-  if (!TRANSPORTS.includes(rawTransport as string)) {
-    problems.push(`transport must be one of: ${TRANSPORTS.join(', ')}`)
+  const transport: TaskTransport = isTransport(rawTransport) ? rawTransport : 'ssh'
+  if (!isTransport(rawTransport)) {
+    problems.push(`transport must be one of: ${Object.keys(TRANSPORTS).join(', ')}`)
   }
 
   const rawReboot = raw.reboot_check ?? false
