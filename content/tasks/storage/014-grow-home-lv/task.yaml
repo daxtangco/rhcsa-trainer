@@ -1,0 +1,27 @@
+id: storage/014-grow-home-lv
+title: Grow /home to 12 GiB
+chapter: 15
+scope: exam-objective
+rhel: 9
+objectives:
+  - storage.lvm.resize
+requires_concepts:
+  - storage.lvm-abstraction-stack
+  - storage.why-xfs-cannot-shrink
+difficulty: 3
+time_budget: 600
+# Present in both editions' chapter 15, so it is durable core material
+# (spec section 14.4).
+weight: high
+editions: [r9, r10]
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  Users are reporting that /home is almost full.
+
+  Make at least 12 GiB of space available under /home, using the free space
+  already present in the volume group. Do not remove any existing data, and do
+  not take space away from any other filesystem.
+
+  Your change must still be in effect after a reboot.

@@ -32,6 +32,19 @@ describe('rhcsa coverage', () => {
     const code = await run(['coverage', '--content', BANK, '--strict'], c.io)
     expect(code).toBe(1)
     expect(c.err.join('\n')).toMatch(/1 uncovered objective/)
+    // A regression that stopped printing the report entirely while still
+    // exiting 1 would pass an exit-code-only assertion.
+    expect(c.out.join('\n')).toMatch(/tasks: \d/)
+  })
+
+  it('exits 2 with usage when --content is the empty string', async () => {
+    // ''.startsWith('--') is false, so an empty value slipped past the
+    // existing guard and loadBank('') resolved against the process cwd — not
+    // a content root anyone meant.
+    const c = capture()
+    const code = await run(['coverage', '--content', ''], c.io)
+    expect(code).toBe(2)
+    expect(c.err.join('\n')).toMatch(/usage: rhcsa/)
   })
 
   it('reports a ContentError legibly and exits 1', async () => {

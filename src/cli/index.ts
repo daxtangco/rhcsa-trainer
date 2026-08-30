@@ -1,6 +1,13 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { checkCoverage, loadBank, type Bank } from '../engine/content/bank.ts'
 import { ContentError } from '../engine/content/errors.ts'
+import { loadTaskScripts } from '../engine/validate/harness.ts'
+import { validateBank } from '../engine/validate/run.ts'
+import { loadVmConfig } from '../engine/vm/config.ts'
+import { chooseTransport } from '../engine/vm/select.ts'
+import { VmController } from '../engine/vm/vmrun.ts'
 
 export interface CliIo {
   out: (line: string) => void
@@ -10,11 +17,13 @@ export interface CliIo {
 const USAGE = `usage: rhcsa <command> [options]
 
 commands:
-  coverage    report content coverage gaps
+  coverage              report content coverage gaps
+  validate [task-id]    run every fixture of every task against the lab VM
 
 options:
-  --content <dir>   content root (default: ./content)
-  --strict          exit non-zero while coverage gaps remain`
+  --content <dir>       content root (default: ./content)
+  --strict              coverage: exit non-zero while gaps remain
+  --snapshot <name>     validate: snapshot to reset to (default: clean)`
 
 interface CoverageOptions {
   root: string
@@ -37,7 +46,10 @@ function parseCoverageArgs(argv: string[]): CoverageOptions | undefined {
     const arg = argv[i]
     if (arg === '--content') {
       const value = argv[i + 1]
-      if (value === undefined || value.startsWith('--')) return undefined
+      // ''.startsWith('--') is false, so an empty value would otherwise slip
+      // past this guard and loadBank('') would resolve against the process
+      // cwd — never a content root anyone meant.
+      if (value === undefined || value === '' || value.startsWith('--')) return undefined
       root = value
       i++
     } else if (arg === '--strict') {
@@ -99,12 +111,119 @@ async function coverage(argv: string[], io: CliIo): Promise<number> {
   return 0
 }
 
+interface ValidateOptions {
+  root: string
+  snapshot: string
+  taskIds: string[]
+}
+
+/**
+ * Same discipline as `parseCoverageArgs`: an explicit list of what `validate`
+ * accepts, and anything else — an unknown `--flag`, a value-flag with no
+ * following value, an empty or flag-shaped value — is a usage error rather
+ * than a silently wrong default. Bare positionals are collected as task ids
+ * instead of being rejected, which is the one shape difference from coverage.
+ */
+function parseValidateArgs(argv: string[]): ValidateOptions | undefined {
+  let root = 'content'
+  let snapshot = 'clean'
+  const taskIds: string[] = []
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--content' || arg === '--snapshot') {
+      const value = argv[i + 1]
+      if (value === undefined || value === '' || value.startsWith('--')) return undefined
+      if (arg === '--content') root = value
+      else snapshot = value
+      i++
+    } else if (arg?.startsWith('--')) {
+      return undefined
+    } else if (arg !== undefined) {
+      taskIds.push(arg)
+    }
+  }
+
+  return { root, snapshot, taskIds }
+}
+
+async function validate(argv: string[], io: CliIo): Promise<number> {
+  const options = parseValidateArgs(argv)
+  if (options === undefined) {
+    io.err(USAGE)
+    return 2
+  }
+  const { root, snapshot, taskIds } = options
+
+  let bank: Bank
+  try {
+    bank = await loadBank(root)
+  } catch (e) {
+    if (e instanceof ContentError) {
+      io.err(e.message)
+      return 1
+    }
+    throw e
+  }
+
+  const tasks = taskIds.length === 0 ? bank.tasks : []
+  for (const id of taskIds) {
+    const t = bank.tasksById.get(id)
+    if (!t) {
+      io.err(`unknown task: ${id}`)
+      return 1
+    }
+    tasks.push(t)
+  }
+
+  if (tasks.length === 0) {
+    io.err(`no tasks found under ${root}/tasks`)
+    return 1
+  }
+
+  const cfg = loadVmConfig(process.env)
+  const controller = new VmController(cfg)
+  // A task can require the vmrun transport; honour the strictest requirement
+  // across the set rather than probing per task.
+  const require = tasks.some((t) => t.transport === 'vmrun') ? 'vmrun' : undefined
+  const transport = await chooseTransport(cfg, require ? { require } : {})
+  io.out(`transport: ${transport.kind}`)
+
+  const assertLib = await readFile(join(root, 'lib', 'assert.sh'), 'utf8')
+
+  const summary = await validateBank({
+    tasks,
+    assertLib,
+    deps: {
+      transport,
+      // Every fixture starts from the same known machine. This is the whole
+      // reason the clean snapshot is captured live.
+      reset: () => controller.revert(snapshot),
+      reboot: () => controller.reboot(),
+    },
+    loadScripts: loadTaskScripts,
+    onTask: (id) => io.out(`\n${id}`),
+  })
+
+  for (const r of summary.results) {
+    io.out(`  ${r.ok ? 'ok  ' : 'FAIL'} ${r.kind}/${r.name}`)
+    for (const f of r.failures) io.out(`         ${f}`)
+  }
+
+  io.out(
+    `\n${summary.results.length - summary.failed.length}/${summary.results.length} fixtures ok`,
+  )
+  return summary.failed.length === 0 ? 0 : 1
+}
+
 export async function run(argv: string[], io: CliIo): Promise<number> {
   const [command, ...rest] = argv
 
   switch (command) {
     case 'coverage':
       return await coverage(rest, io)
+    case 'validate':
+      return await validate(rest, io)
     default:
       io.err(USAGE)
       return 2

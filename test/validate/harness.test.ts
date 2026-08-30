@@ -553,4 +553,115 @@ describe('validateTask', () => {
     expect(results[0]?.failures).toHaveLength(1)
     expect(results[0]?.failures[0]).toMatch(/must declare a "# expect-fail:" header/)
   })
+
+  // --- Task 21 mandates ---
+
+  it('mandate 2: fails a solution fixture whose script exits non-zero, naming the exit code, without a checkpoint mismatch', async () => {
+    // set -euo pipefail means a real solution script that hits a command
+    // error (e.g. lvextend: insufficient free space) stops there and does
+    // nothing. Discarding this exit code would make the machine look exactly
+    // like no-action, and the harness would misreport it as grader
+    // over-fitting rather than a script that could not run.
+    const w = world()
+    const bad = deps(w)
+    bad.transport = new FakeTransport((script) => {
+      if (script === CORRECT) {
+        return { stdout: '', stderr: 'lvextend: insufficient free space', code: 5 }
+      }
+      return w.handler(script)
+    })
+    const s = scripts()
+    s.fixtures = [{ kind: 'solution', name: '01.sh', script: CORRECT }]
+
+    const results = await validateTask(task(), s, bad)
+    expect(results[0]?.ok).toBe(false)
+    expect(results[0]?.failures).toEqual([
+      'solution script exited 5: lvextend: insufficient free space',
+    ])
+  })
+
+  it('mandate 2: fails an antisolution fixture whose script exits non-zero, naming the exit code', async () => {
+    // Applies identically to anti-solutions: antisolutions/03-wrong-lv.sh
+    // declares the same checkpoint set as grade.sh's baseline-fail on
+    // purpose, so a silently-swallowed exit code there would make a
+    // no-op fixture pass its own declaration while probing nothing.
+    const w = world()
+    const bad = deps(w)
+    bad.transport = new FakeTransport((script) => {
+      if (script.includes('lvextend')) {
+        return { stdout: '', stderr: 'lvextend: insufficient free space', code: 5 }
+      }
+      return w.handler(script)
+    })
+    const s = scripts()
+    s.fixtures = [
+      {
+        kind: 'antisolution',
+        name: '03-wrong-lv.sh',
+        script: '# expect-fail: lv-var-size\nsudo lvextend -r -L +4G /dev/rhel/root\n',
+      },
+    ]
+
+    const results = await validateTask(task(), s, bad)
+    expect(results[0]?.ok).toBe(false)
+    expect(results[0]?.failures).toEqual([
+      'antisolution script exited 5: lvextend: insufficient free space',
+    ])
+  })
+
+  it('mandate 3: reports @post declarations as unverified when an anti-solution passes nothing before the reboot', async () => {
+    // grade() skips the reboot whenever nothing passed in verdict A (see
+    // grader.ts's anythingPassed guard). For a *solution* fixture the harness
+    // already catches this. For an anti-solution that declares an @post
+    // checkpoint, the declaration would otherwise go completely unverified:
+    // the fixture reports ok because verdict B never ran to contradict it.
+    const transport = new FakeTransport((script) =>
+      script.includes('GRADE')
+        ? {
+            stdout: [
+              '{"id":"lv-var-size","desc":"x","status":"fail"}',
+              '{"id":"persist-config","desc":"y","status":"fail"}',
+              '{"id":"var-from-lv","desc":"z","status":"fail"}',
+            ].join('\n'),
+            stderr: '',
+            code: 0,
+          }
+        : { stdout: '', stderr: '', code: 0 },
+    )
+    const d = { transport, reset: async () => {}, reboot: async () => {} }
+    const s = scripts()
+    s.fixtures = [
+      {
+        kind: 'antisolution',
+        name: '08-nothing-passed.sh',
+        script: `# expect-fail: lv-var-size, persist-config, var-from-lv@post\n${FORGOT_PERSIST}`,
+      },
+    ]
+
+    const results = await validateTask(task(), s, d)
+    expect(results[0]?.ok).toBe(false)
+    expect(results[0]?.failures.join('\n')).toMatch(
+      /verdict B was skipped: no checkpoint passed before the reboot, so the @post declarations were never verified \(var-from-lv\)/,
+    )
+  })
+
+  it('mandate 3: does not fire when the anti-solution declares no @post checkpoint', async () => {
+    // Retiring the "@pre-only anti-solution is invalid" phrasing (parked
+    // finding 2's ledger summary) means a plain @pre-or-both declaration must
+    // never trip this, even when nothing passed in A.
+    const transport = new FakeTransport((script) =>
+      script.includes('GRADE')
+        ? { stdout: '{"id":"lv-var-size","desc":"x","status":"fail"}', stderr: '', code: 0 }
+        : { stdout: '', stderr: '', code: 0 },
+    )
+    const d = { transport, reset: async () => {}, reboot: async () => {} }
+    const s = scripts()
+    s.fixtures = [
+      { kind: 'antisolution', name: '09-pre-only.sh', script: '# expect-fail: lv-var-size\n' },
+    ]
+
+    const results = await validateTask(task(), s, d)
+    expect(results[0]?.ok).toBe(true)
+    expect(results[0]?.failures).toEqual([])
+  })
 })

@@ -57,6 +57,11 @@ export async function loadTaskScripts(task: TaskSpec, assertLib: string): Promis
 
   return {
     setup,
+    // assertLib is prepended before grade.sh's own text, so `# baseline-fail:`
+    // gets parsed out of the *combined* string below. An assertion library
+    // that ever contained that literal would trip expectations.ts's "more
+    // than one header" guard — acceptable, since that fails loudly rather
+    // than silently. content/lib/assert.sh does not contain it today.
     grade: `${assertLib}\n${gradeBody}`,
     fixtures: [
       { kind: 'none', name: 'no-action', script: '' },
@@ -184,7 +189,20 @@ async function runFixture(
     return { taskId: task.id, kind: fixture.kind, name: fixture.name, ok: false, failures }
   }
 
-  if (fixture.script.trim() !== '') await deps.transport.exec(fixture.script)
+  if (fixture.script.trim() !== '') {
+    // Same reasoning as setup.sh above: a fixture script that aborts leaves the
+    // grader measuring a machine nobody arranged, so its checkpoint mismatches
+    // would be red herrings pointing at the grader. Every fixture here runs
+    // `set -euo pipefail`; an anti-solution that deliberately models a command
+    // erroring should say so with an explicit `|| true`.
+    const fixtureResult = await deps.transport.exec(fixture.script)
+    if (fixtureResult.code !== 0) {
+      failures.push(
+        `${fixture.kind} script exited ${fixtureResult.code}: ${fixtureResult.stderr.trim()}`,
+      )
+      return { taskId: task.id, kind: fixture.kind, name: fixture.name, ok: false, failures }
+    }
+  }
 
   const result = await grade({
     task,
@@ -244,6 +262,17 @@ async function runFixture(
       // all, which a solution must never produce.
       if (fixture.kind === 'solution') {
         failures.push('verdict B was skipped: no checkpoint passed before the reboot')
+      } else if (declared.some((d) => d.phase === 'post')) {
+        // grade() skips the reboot when nothing passed in verdict A, so these
+        // @post declarations were never actually verified. Passing green here
+        // would mean the fixture tested half of what it claims.
+        const ids = declared
+          .filter((d) => d.phase === 'post')
+          .map((d) => d.id)
+          .join(', ')
+        failures.push(
+          `verdict B was skipped: no checkpoint passed before the reboot, so the @post declarations were never verified (${ids})`,
+        )
       }
     }
   }
