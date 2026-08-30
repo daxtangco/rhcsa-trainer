@@ -91,6 +91,7 @@ fi
 PKGS=(
   open-vm-tools   # how vmrun learns the guest IP
   policycoreutils-python-utils  # semanage, needed to *check* SELinux contexts
+  libselinux-utils  # matchpathcon and getenforce, both used by graders and below
   lvm2
   xfsprogs
   e2fsprogs
