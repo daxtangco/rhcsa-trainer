@@ -155,16 +155,22 @@ Log in as `student` at the console.
    printf 'student ALL=(ALL) NOPASSWD: ALL\n' | sudo tee /etc/sudoers.d/rhcsa-trainer >/dev/null
    sudo chmod 0440 /etc/sudoers.d/rhcsa-trainer
    sudo visudo -cf /etc/sudoers.d/rhcsa-trainer
-   sudo -n true && echo "passwordless sudo is in effect"
+   sudo -k && sudo -n true && echo "passwordless sudo is in effect"
    ```
 
    **The `visudo -cf` check is not decoration.** A malformed drop-in can lock
-   `sudo` out of the machine entirely. If it does not print `parsed OK`, fix or
-   remove the file before logging out of the console — that is the last moment
-   this can be fixed without falling back to `golden`.
+   `sudo` out of the machine entirely. If it does not end with
+   `: parsed OK`, fix or remove the file before logging out of the console —
+   that is the last moment this can be fixed without falling back to
+   `golden`.
 
-   `sudo -n true` printing `passwordless sudo is in effect` is the proof it
-   worked. After this, every `sudo` in the guest — including every grader,
+   `sudo -k` throws away the cached credential from the password you just
+   typed for the `tee` command above — without it, `sudo -n true` would pass
+   on that ten-second-old ticket regardless of whether the NOPASSWD rule
+   actually took effect, which is not the thing this check is supposed to
+   prove. With `sudo -k` in front, `sudo -n true` printing `passwordless sudo
+   is in effect` is the proof it worked: the rule, not a cached password.
+   After this, every `sudo` in the guest — including every grader,
    setup script, solution and anti-solution the app runs — needs no password,
    and nothing in the project works without it. `scripts/provision.sh` (Task
    19) does the rest of the guest configuration — the ssh key, the local
