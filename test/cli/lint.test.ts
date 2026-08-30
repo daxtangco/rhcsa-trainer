@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -72,9 +72,29 @@ describe('rhcsa lint on the shipped bank', () => {
 
   it('prints the inventory it checked, not just a verdict', async () => {
     const r = await lint(CONTENT)
-    expect(r.out).toMatch(/baseline-fail: fs-home-size, lv-home-size/)
+    expect(r.out).toMatch(/baseline-fail: fs-home-size@both, lv-home-size@both/)
     expect(r.out).toMatch(/unprobed-invariant: var-intact/)
     expect(r.out).toMatch(/emits: fs-home-size, home-from-lv, lv-home-size, persist-config, var-intact/)
+  })
+
+  it('prints the @phase of every declared checkpoint, not just its id', async () => {
+    // The phase is verdict A versus verdict B — "it works now" versus "it
+    // survives a reboot" — which is the single distinction this project exists to
+    // teach, and the one the RHCSA exam punishes people for missing. It has to be
+    // visible in the output a reviewer reads and in the fixture the drift check
+    // compares, not parsed and then dropped on the floor.
+    const r = await lint(CONTENT)
+    expect(r.out).toMatch(/expect-fail: fs-home-size@post, home-from-lv@post, persist-config@both/)
+    // The default phase is written out rather than omitted, so losing a @post
+    // reads as @post -> @both in a diff instead of as a suffix vanishing. If any
+    // declared entry ever prints bare, this catches it.
+    for (const line of r.out.split('\n')) {
+      const m = /^ {2}(baseline-fail|expect-fail): (.*)$/.exec(line)
+      if (m === null) continue
+      for (const entry of (m[2] ?? '').split(', ')) {
+        expect(entry, `${line} has a declared entry with no @phase`).toMatch(/@(pre|post|both)$/)
+      }
+    }
   })
 
   it('reports emitted-but-undeclared ids as notes on stdout, never as failures', async () => {
@@ -195,6 +215,69 @@ describe('rhcsa lint fails on planted defects', () => {
     expect(r.err).toMatch(/LV_Size/)
     expect(r.err).toMatch(/Other_Id/)
     expect(r.err).toMatch(/^2 problem\(s\)$/m)
+  })
+})
+
+describe('rhcsa lint fails when there is nothing to check', () => {
+  // "Nothing to check" must not be indistinguishable from "all clear". Every
+  // check in `lintContent` is a loop over the graders it found, so an empty
+  // grader list runs zero checks, collects zero problems and would exit 0 — a
+  // gate reporting success it did not earn, which is the same shape as the
+  // fail-open defects this lint was written to catch.
+  //
+  // This is not a hypothetical: a moved `content/`, a typo'd `--content` path
+  // that happens to name a real directory, or a half-finished checkout all
+  // produce it, and the thing that gates — a CI step, a pre-commit hook, an npm
+  // script in a wrapper — reads the exit code, not the stdout that helpfully
+  // says `graders checked: 0`.
+
+  async function emptyRoot(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'rhcsa-lint-empty-'))
+    temps.push(dir)
+    // A real directory holding real shell scripts, none of which is a grader —
+    // strictly harder than an empty directory, and closer to a bank whose task
+    // directories were moved out from under it.
+    await mkdir(join(dir, 'tasks', 'storage', '014-grow-home-lv'), { recursive: true })
+    await writeFile(join(dir, 'tasks', 'storage', '014-grow-home-lv', 'setup.sh'), '#!/bin/bash\ntrue\n', 'utf8')
+    return dir
+  }
+
+  it('exits non-zero with a named problem on a content root holding no grade.sh', async () => {
+    const r = await lint(await emptyRoot())
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/no grade\.sh found, so nothing was checked/)
+    // The message has to say what to do, because the operator seeing it is
+    // most likely looking at a path problem, not a content problem.
+    expect(r.err).toMatch(/--allow-empty/)
+    expect(r.out).toMatch(/graders checked: 0/)
+  })
+
+  it('exits 0 there when --allow-empty says the empty bank is expected', async () => {
+    const c = capture()
+    const code = await run(['lint', '--content', await emptyRoot(), '--allow-empty'], c.io)
+    expect(c.err.join('\n')).toBe('')
+    expect(code).toBe(0)
+    expect(c.out.join('\n')).toMatch(/no problems in 0 grader\(s\)/)
+  })
+
+  it('still exits non-zero for a root that does not exist at all', async () => {
+    // The ENOENT path and the empty path are different code paths with the same
+    // required outcome; a fix to one must not quietly regress the other.
+    const c = capture()
+    expect(await run(['lint', '--content', join(tmpdir(), 'rhcsa-no-such-root-2')], c.io)).toBe(1)
+  })
+
+  it('does not let --allow-empty suppress a real problem in a non-empty bank', async () => {
+    // The flag says "zero graders is acceptable here", not "be quiet". Widening
+    // it into a general mute is the obvious wrong turn for the next person
+    // editing this, so it is pinned.
+    const root = await bankCopy()
+    await plant(root, (t) => `${t}true; ck LV_Size "bad name" $?\n`)
+
+    const c = capture()
+    const code = await run(['lint', '--content', root, '--allow-empty'], c.io)
+    expect(code).toBe(1)
+    expect(c.err.join('\n')).toMatch(/LV_Size/)
   })
 })
 

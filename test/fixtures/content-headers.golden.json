@@ -4,8 +4,8 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "context-permanent"
+        "declared": [
+          "context-permanent@both"
         ]
       }
     ],
@@ -16,9 +16,9 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "firewall-permanent",
-          "firewall-runtime"
+        "declared": [
+          "firewall-permanent@both",
+          "firewall-runtime@post"
         ]
       }
     ],
@@ -29,9 +29,9 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "page-served",
-          "port-labeled"
+        "declared": [
+          "page-served@both",
+          "port-labeled@both"
         ]
       }
     ],
@@ -42,9 +42,9 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "httpd-enabled",
-          "page-served"
+        "declared": [
+          "httpd-enabled@both",
+          "page-served@post"
         ]
       }
     ],
@@ -55,9 +55,9 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "context-now",
-          "page-served"
+        "declared": [
+          "context-now@both",
+          "page-served@both"
         ]
       }
     ],
@@ -68,19 +68,19 @@
     "headers": [
       {
         "kind": "baseline-fail",
-        "ids": [
-          "context-now",
-          "context-permanent",
-          "firewall-permanent",
-          "firewall-runtime",
-          "httpd-enabled",
-          "page-served",
-          "port-labeled"
+        "declared": [
+          "context-now@both",
+          "context-permanent@both",
+          "firewall-permanent@both",
+          "firewall-runtime@both",
+          "httpd-enabled@both",
+          "page-served@both",
+          "port-labeled@both"
         ]
       },
       {
         "kind": "unprobed-invariant",
-        "ids": [
+        "declared": [
           "selinux-enforcing"
         ]
       }
@@ -101,8 +101,8 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "fs-home-size"
+        "declared": [
+          "fs-home-size@both"
         ]
       }
     ],
@@ -113,10 +113,10 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "fs-home-size",
-          "home-from-lv",
-          "persist-config"
+        "declared": [
+          "fs-home-size@post",
+          "home-from-lv@post",
+          "persist-config@both"
         ]
       }
     ],
@@ -127,9 +127,9 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "fs-home-size",
-          "lv-home-size"
+        "declared": [
+          "fs-home-size@both",
+          "lv-home-size@both"
         ]
       }
     ],
@@ -140,14 +140,14 @@
     "headers": [
       {
         "kind": "baseline-fail",
-        "ids": [
-          "fs-home-size",
-          "lv-home-size"
+        "declared": [
+          "fs-home-size@both",
+          "lv-home-size@both"
         ]
       },
       {
         "kind": "unprobed-invariant",
-        "ids": [
+        "declared": [
           "var-intact"
         ]
       }
@@ -165,9 +165,9 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "stamp-effect",
-          "stamp-enabled"
+        "declared": [
+          "stamp-effect@post",
+          "stamp-enabled@both"
         ]
       }
     ],
@@ -178,10 +178,10 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "stamp-effect",
-          "stamp-enabled",
-          "unit-verifies"
+        "declared": [
+          "stamp-effect@post",
+          "stamp-enabled@both",
+          "unit-verifies@both"
         ]
       }
     ],
@@ -192,8 +192,8 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "default-target"
+        "declared": [
+          "default-target@both"
         ]
       }
     ],
@@ -204,15 +204,15 @@
     "headers": [
       {
         "kind": "baseline-fail",
-        "ids": [
-          "stamp-effect",
-          "stamp-enabled",
-          "unit-verifies"
+        "declared": [
+          "stamp-effect@both",
+          "stamp-enabled@both",
+          "unit-verifies@both"
         ]
       },
       {
         "kind": "unprobed-invariant",
-        "ids": [
+        "declared": [
           "sshd-intact"
         ]
       }
@@ -230,9 +230,9 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "sshd-enabled",
-          "sshd-listening"
+        "declared": [
+          "sshd-enabled@both",
+          "sshd-listening@post"
         ]
       }
     ],
@@ -243,8 +243,8 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "firewall-ssh"
+        "declared": [
+          "firewall-ssh@both"
         ]
       }
     ],
@@ -255,8 +255,8 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "net-autoconnect"
+        "declared": [
+          "net-autoconnect@both"
         ]
       }
     ],
@@ -267,16 +267,16 @@
     "headers": [
       {
         "kind": "baseline-fail",
-        "ids": [
-          "firewall-ssh",
-          "net-autoconnect",
-          "sshd-enabled",
-          "sshd-listening"
+        "declared": [
+          "firewall-ssh@both",
+          "net-autoconnect@both",
+          "sshd-enabled@both",
+          "sshd-listening@both"
         ]
       },
       {
         "kind": "unprobed-invariant",
-        "ids": [
+        "declared": [
           "student-intact"
         ]
       }
@@ -294,11 +294,11 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "alice-in-devops",
-          "bob-in-devops",
-          "carol-in-devops",
-          "sudo-devops"
+        "declared": [
+          "alice-in-devops@both",
+          "bob-in-devops@both",
+          "carol-in-devops@both",
+          "sudo-devops@both"
         ]
       }
     ],
@@ -309,10 +309,10 @@
     "headers": [
       {
         "kind": "expect-fail",
-        "ids": [
-          "alice-maxdays",
-          "carol-expiry",
-          "group-gid"
+        "declared": [
+          "alice-maxdays@both",
+          "carol-expiry@both",
+          "group-gid@both"
         ]
       }
     ],
@@ -323,19 +323,19 @@
     "headers": [
       {
         "kind": "baseline-fail",
-        "ids": [
-          "alice-in-devops",
-          "alice-maxdays",
-          "bob-in-devops",
-          "carol-expiry",
-          "carol-in-devops",
-          "group-gid",
-          "sudo-devops"
+        "declared": [
+          "alice-in-devops@both",
+          "alice-maxdays@both",
+          "bob-in-devops@both",
+          "carol-expiry@both",
+          "carol-in-devops@both",
+          "group-gid@both",
+          "sudo-devops@both"
         ]
       },
       {
         "kind": "unprobed-invariant",
-        "ids": [
+        "declared": [
           "student-intact"
         ]
       }

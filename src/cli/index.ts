@@ -25,6 +25,7 @@ commands:
 options:
   --content <dir>       content root (default: ./content)
   --strict              coverage: exit non-zero while gaps remain
+  --allow-empty         lint: accept a content root with no grade.sh
   --snapshot <name>     validate: snapshot to reset to (default: clean)`
 
 interface CoverageOptions {
@@ -114,13 +115,19 @@ async function coverage(argv: string[], io: CliIo): Promise<number> {
 }
 
 /**
- * `lint` takes `--content` and nothing else. Same discipline as the other two
- * parsers, and `--strict` is deliberately not accepted: every problem this
- * command reports is already an error, so a flag that turned some of them into
- * errors would imply the rest were optional.
+ * `lint` takes `--content` and `--allow-empty`, and nothing else. Same discipline
+ * as the other two parsers, and `--strict` is deliberately not accepted: every
+ * problem this command reports is already an error, so a flag that turned some of
+ * them into errors would imply the rest were optional.
+ *
+ * `--allow-empty` is the opposite kind of flag and is why it is accepted: without
+ * it a content root with no `grade.sh` would exit 0, and "nothing to check" read
+ * as "all clear" is the failure this whole command exists to prevent. The flag
+ * makes the one legitimate empty case state itself.
  */
-function parseLintArgs(argv: string[]): { root: string } | undefined {
+function parseLintArgs(argv: string[]): { root: string; allowEmpty: boolean } | undefined {
   let root = 'content'
+  let allowEmpty = false
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -129,12 +136,14 @@ function parseLintArgs(argv: string[]): { root: string } | undefined {
       if (value === undefined || value === '' || value.startsWith('--')) return undefined
       root = value
       i++
+    } else if (arg === '--allow-empty') {
+      allowEmpty = true
     } else {
       return undefined
     }
   }
 
-  return { root }
+  return { root, allowEmpty }
 }
 
 async function lint(argv: string[], io: CliIo): Promise<number> {
@@ -146,7 +155,7 @@ async function lint(argv: string[], io: CliIo): Promise<number> {
 
   let result: Awaited<ReturnType<typeof lintContent>>
   try {
-    result = await lintContent(options.root)
+    result = await lintContent(options.root, { allowEmpty: options.allowEmpty })
   } catch (e) {
     // A missing or unreadable content root is a usage-shaped failure, not a
     // crash: `lint` is the one command that runs on a fresh checkout, so its
@@ -165,7 +174,7 @@ async function lint(argv: string[], io: CliIo): Promise<number> {
   // fixture — and printing it is what lets a reader confirm the fixture by eye.
   for (const entry of result.inventory) {
     io.out(`\n${entry.file}`)
-    for (const h of entry.headers) io.out(`  ${h.kind}: ${h.ids.join(', ')}`)
+    for (const h of entry.headers) io.out(`  ${h.kind}: ${h.declared.join(', ')}`)
     if (entry.emitted.length > 0) io.out(`  emits: ${entry.emitted.join(', ')}`)
   }
 

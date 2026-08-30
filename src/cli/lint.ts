@@ -29,12 +29,32 @@ export type HeaderKind = 'baseline-fail' | 'expect-fail' | 'unprobed-invariant'
 export interface HeaderRecord {
   kind: HeaderKind
   /**
-   * Declared ids, **sorted**. Header order carries no meaning — `expectedStatus`
-   * looks ids up by `find` and `parseExpectations` already rejects a repeat — so
+   * Declared checkpoints as `id@phase`, **sorted** — `fs-home-size@post`,
+   * `lv-home-size@both`. Header order carries no meaning (`expectedStatus` looks
+   * ids up by `find` and `parseExpectations` already rejects a repeat), so
    * sorting is lossless and keeps a reordered header from showing up as fixture
    * drift a reviewer has to read past.
+   *
+   * **The phase is part of the record, and the field is named `declared` rather
+   * than `ids` to keep it that way.** An earlier version stored bare ids, which
+   * made the golden fixture blind to the one distinction this project exists to
+   * teach: `@pre` versus `@post` is verdict A versus verdict B, "it works now"
+   * versus "it survives a reboot". Flipping a shipped `fs-home-size@post` to
+   * `@pre` inverts an anti-solution's persistence semantics, and every static
+   * check stayed green with a byte-identical fixture while `expectedStatus` —
+   * which does read the phase — silently changed its verdict. The rename is
+   * deliberate: it forces the compiler to flag every site that used to compare
+   * these against emitted ids, because a phase-suffixed string must never be
+   * compared to a bare emitted id.
+   *
+   * The default phase is written out as `@both` rather than omitted, so a
+   * dropped `@post` reads as `@post` → `@both` in a diff instead of as a
+   * suffix appearing from nowhere.
+   *
+   * `unprobed-invariant` has no phase grammar — `parseUnprobed` splits on commas
+   * and nothing else — so its entries are bare ids.
    */
-  ids: string[]
+  declared: string[]
 }
 
 export interface ScriptRecord {
@@ -89,7 +109,10 @@ function unprobedRe(flags: string): RegExp {
 }
 
 interface ParsedHeader {
+  /** Bare ids. This is the only form that may be compared against emitted ids. */
   ids: string[]
+  /** `id@phase` for the inventory. Same ids, same order, phase retained. */
+  declared: string[]
   problems: string[]
 }
 
@@ -101,14 +124,14 @@ interface ParsedHeader {
  */
 function parseUnprobed(script: string): ParsedHeader {
   const matches = script.match(unprobedRe('gim'))
-  if (matches === null || matches.length === 0) return { ids: [], problems: [] }
+  if (matches === null || matches.length === 0) return { ids: [], declared: [], problems: [] }
   if (matches.length > 1) {
-    return { ids: [], problems: ['more than one "# unprobed-invariant:" header found'] }
+    return { ids: [], declared: [], problems: ['more than one "# unprobed-invariant:" header found'] }
   }
 
   const body = (unprobedRe('im').exec(script)?.[1] ?? '').trim()
   if (body === '') {
-    return { ids: [], problems: ['"# unprobed-invariant:" must name at least one checkpoint id'] }
+    return { ids: [], declared: [], problems: ['"# unprobed-invariant:" must name at least one checkpoint id'] }
   }
 
   const ids: string[] = []
@@ -124,7 +147,8 @@ function parseUnprobed(script: string): ParsedHeader {
     seen.add(id)
     ids.push(id)
   }
-  return { ids, problems }
+  // No phase grammar on this header, so `declared` is the bare ids.
+  return { ids, declared: [...ids], problems }
 }
 
 /**
@@ -186,9 +210,14 @@ async function shellScripts(dir: string): Promise<string[]> {
 /** `parseExpectations` throws an aggregating ContentError; lint collects instead of stopping at the first bad file. */
 function declaredIds(script: string, where: string, header: 'expect-fail' | 'baseline-fail'): ParsedHeader {
   try {
-    return { ids: parseExpectations(script, where, header).map((d) => d.id), problems: [] }
+    const decl = parseExpectations(script, where, header)
+    return {
+      ids: decl.map((d) => d.id),
+      declared: decl.map((d) => `${d.id}@${d.phase}`),
+      problems: [],
+    }
   } catch (e) {
-    if (e instanceof ContentError) return { ids: [], problems: e.problems }
+    if (e instanceof ContentError) return { ids: [], declared: [], problems: e.problems }
     throw e
   }
 }
@@ -219,7 +248,15 @@ function taskDirOf(gradeScript: string): string {
   return gradeScript.slice(0, gradeScript.length - '/grade.sh'.length)
 }
 
-export async function lintContent(root: string): Promise<LintResult> {
+export interface LintOptions {
+  /**
+   * Accept a content root containing no `grade.sh`. Off by default; see the
+   * `graders.length === 0` guard in `lintContent` for why.
+   */
+  allowEmpty?: boolean
+}
+
+export async function lintContent(root: string, opts: LintOptions = {}): Promise<LintResult> {
   const problems: string[] = []
   const notes: string[] = []
   const inventory: ScriptRecord[] = []
@@ -237,6 +274,28 @@ export async function lintContent(root: string): Promise<LintResult> {
   // what `checkEmittedIds` compares against at runtime.
   const emittedByTask = new Map<string, Set<string>>()
   const graders = files.filter((f) => f.endsWith('/grade.sh'))
+
+  // "Nothing to check" must not be indistinguishable from "all clear".
+  //
+  // Every check below is a loop over `graders`, so an empty `graders` runs zero
+  // checks, collects zero problems and exits 0 — green, from a gate that never
+  // looked at anything. A *nonexistent* root already exits 1 because `readdir`
+  // throws ENOENT; it is the existing-but-empty case that bites, which is what a
+  // moved `content/`, a bad `--content` path or a half-finished checkout produces.
+  // A human reading stdout sees `graders checked: 0`, but a CI step, a pre-commit
+  // hook or an npm script in a wrapper reads only the exit code.
+  //
+  // This is the same shape as the fail-open defects this lint exists to catch: a
+  // tool reporting success it did not earn. `--allow-empty` exists so the one
+  // legitimate case — deliberately linting a root before any task is authored —
+  // has to say so out loud.
+  if (graders.length === 0 && opts.allowEmpty !== true) {
+    problems.push(
+      `${root}: no grade.sh found, so nothing was checked. That is not the same as "all clear" — ` +
+        `check the content root, or pass --allow-empty if an empty bank is genuinely expected.`,
+    )
+  }
+
   for (const grader of graders) {
     emittedByTask.set(taskDirOf(grader), new Set(checkpointIds(text.get(grader) ?? '')))
   }
@@ -287,9 +346,9 @@ export async function lintContent(root: string): Promise<LintResult> {
       notes.push(`${where}: ${id} is emitted but named by no header (an invariant that passes at baseline)`)
     }
 
-    const headers: HeaderRecord[] = [{ kind: 'baseline-fail', ids: [...baseline.ids].sort() }]
-    if (unprobed.ids.length > 0) {
-      headers.push({ kind: 'unprobed-invariant', ids: [...unprobed.ids].sort() })
+    const headers: HeaderRecord[] = [{ kind: 'baseline-fail', declared: [...baseline.declared].sort() }]
+    if (unprobed.declared.length > 0) {
+      headers.push({ kind: 'unprobed-invariant', declared: [...unprobed.declared].sort() })
     }
     inventory.push({ file: where, headers, emitted: [...emitted].sort() })
   }
@@ -312,7 +371,7 @@ export async function lintContent(root: string): Promise<LintResult> {
 
     inventory.push({
       file: where,
-      headers: [{ kind: 'expect-fail', ids: [...expected.ids].sort() }],
+      headers: [{ kind: 'expect-fail', declared: [...expected.declared].sort() }],
       emitted: [...checkpointIds(script)].sort(),
     })
   }

@@ -15,8 +15,9 @@ run with `npm run test:vm`. It proves the spine works: bank, session,
 guest, grader, verdict A, reboot, verdict B, rating. It also checks that the
 rung-2 nudge names the objective and both card titles without naming a single
 command, and that rung 3 renders both cards in full. That is evidence the cards
-were *shown*, and it is the closest a test can get. Whether they *taught* is
-question 4 below, and only you can answer it.
+were *shown*, and it is the closest a test can get. Whether they *taught* is the
+"from the cards alone" question in "The run" below — referred to by name and not
+by number, because the numbers move — and only you can answer it.
 
 The manual half is below, and it is the half that matters. Fill in the
 dates and the answers the first time you run it, and again whenever the
@@ -29,14 +30,32 @@ disclosure ladder or the content conventions change.
 - Task: `storage/014-grow-home-lv`
 - Transport reported at startup:
 
-1. Started the lab. The prompt was on screen the whole time: yes / no
-2. `df -h /home` in the terminal showed a nearly full 8 GiB filesystem: yes / no
-3. Pressed F2 twice and read both concept cards.
-4. **Could you solve the task from the cards alone, with no other reference open?** yes / no
+1. Opened the picker. Every task lists a chapter number — `ch15` on
+   `Grow /home to 12 GiB`, `ch22` on `Serve a directory on a non-standard port` —
+   and **`Serve a directory on a non-standard port` is the one task carrying a
+   `supporting` badge**: yes / no
+   - It is the only `scope: instrumental` task in the bank, so it is the only
+     badge that can render. If every task shows it, or none does, `scope` has
+     stopped reaching the picker.
+   - Nothing automated references `supporting` or asserts on a chapter number, so
+     this line is the only check that exists on
+     `src/web/components/TaskPicker.tsx:63-65`. It is a checklist item and not a
+     test, which is precisely why it must not be dropped again.
+2. Started the lab. The prompt was on screen the whole time: yes / no
+3. `df -h /home` in the terminal showed a nearly full 8 GiB filesystem: yes / no
+4. Pressed F2 twice and read both concept cards.
+5. **Could you solve the task from the cards alone, with no other reference open?** yes / no
    - If no: what was missing from the cards?
-5. Solved it. Commands used:
-6. Pressed F4. Reboot check ran: yes / no. Result: __ / 5
-7. Pressed F8. Rating:
+6. Solved it. Commands used:
+7. Pressed F4. Reboot check ran: yes / no. Result: __ / 5
+8. Pressed F8. Rating:
+   - The screen also states that the rating is **derived**: *"derived from the
+     grade, the rung you needed and the time you took — nothing here is
+     self-reported"*. Is that sentence present? yes / no
+   - Not decoration. A student who thinks the rating is self-reported treats it as
+     an opinion to argue with rather than a measurement, and the scheduler rests
+     on it being the latter. The copy is at `src/web/App.tsx:281`, `App.tsx` has
+     no test, so this line is its only check.
 
 ## The question the whole project turns on
 
@@ -106,23 +125,31 @@ checklist; there is no parallel one. Every check has a home above.
 
 | Task 24 check | Covered by |
 |---|---|
-| 1 picker lists tasks with chapter numbers | "The run" item 1 |
-| 2 start → prompt above a live shell | "The run" item 1 |
-| 3 `df -h /home` shows a full 8 GiB | "The run" item 2 |
-| 4 F2 → rung-2 nudge, no commands | "The run" item 3, and asserted by the e2e test |
-| 5 F2 again → both cards in full | "The run" items 3-4, and asserted by the e2e test |
-| 6 solve it in the terminal | "The run" item 5 |
-| 7 F4 → reboot wait, then 5/5 named | "The run" item 6, and asserted by the e2e test |
-| 8 F8 → rating, derived not self-reported | "The run" item 7, and asserted by the e2e test |
+| 1 picker lists chapter numbers and the `supporting` badge | "The run" item 1 |
+| 2 start → prompt above a live shell | "The run" item 2 |
+| 3 `df -h /home` shows a full 8 GiB | "The run" item 3 |
+| 4 F2 → rung-2 nudge, no commands | "The run" item 4, and asserted by the e2e test † |
+| 5 F2 again → both cards in full | "The run" items 4-5, and asserted by the e2e test † |
+| 6 solve it in the terminal | "The run" item 6 |
+| 7 F4 → reboot wait, then 5/5 named | "The run" item 7, and asserted by the e2e test † |
+| 8 F8 → rating, derived not self-reported | "The run" item 8 (both halves), and the rating asserted by the e2e test † |
 | 9-11 exam-mode masking | "Second manual scenario", exam-mode masking |
 | 12-13 the persistence message | "Second manual scenario", persistence |
 | 14 reset lab reverts machine and clock but not disclosure | "Fourth: reset", below |
 | 15 foreign-origin WebSocket refusal | "Third", above |
 
-Checks 1, 7 and 8 carry predictions rather than assertions — the task count,
-the `3 / 5` tally and the specific rating all depend on content and on the rung
-reached. Do not treat a different number as a failure; treat a different
-*shape* as one.
+**† The assertion exists; it has never executed.** `test/vm/e2e-exit-criterion.vm.test.ts`
+is excluded unless `RHCSA_VM=1`, and no VM exists, so a `†` row has a *written*
+assertion rather than a passing one. Read those four rows as "there is a test
+waiting to run", not as coverage. The e2e suite has to run green once before any
+`†` means what a "Covered by" column normally means.
+
+Checks 1, 7, 8 and 9 carry predictions rather than assertions: check 1's task
+count, check 7's `5 / 5`, check 9's partial `3 / 5` tally in exam mode, and check
+8's specific rating all depend on the content and on the rung reached. Do not
+treat a different number as a failure; treat a different *shape* as one — a
+missing badge, an unnamed checkpoint, a rating that was asked for rather than
+derived.
 
 ## Fourth: reset, not yet run
 

@@ -209,8 +209,18 @@ describe('phase 1 exit criterion', () => {
       // three earlier arms do not fire: no regression, rung below 4, and
       // `passed` true.
       expect(done.rating).toBe('hard')
+      // Finishing is what lifts the mask, so this is the assertion that the names
+      // came back. `Array.isArray([])` is true, so checking only the type
+      // certified the unmask on an empty reveal — the same defect mandate 6 exists
+      // to remove, recurring in the one assertion mandate 6 did not name. Assert
+      // the count and pin an id.
       const finalReport = obj(done.report, 'final grade report')
-      expect(Array.isArray(finalReport.checkpoints)).toBe(true)
+      const revealed = finalReport.checkpoints
+      if (!Array.isArray(revealed)) {
+        throw new Error(`final report checkpoints: expected an array, got ${JSON.stringify(revealed)}`)
+      }
+      expect(revealed).toHaveLength(5)
+      expect(revealed.map((c) => obj(c, 'revealed checkpoint').id)).toContain('fs-home-size')
     },
     E2E_TIMEOUT,
   )
