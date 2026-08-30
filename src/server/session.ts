@@ -38,12 +38,24 @@ export interface SessionRecord {
  * in a comment (stripped before matching) and, in practice, to the word `ck`
  * inside a string, since no separator precedes it there.
  *
+ * The id class is deliberately **wider than the authoring convention**, which is
+ * lowercase kebab and stays that way — enforcing it belongs to the static lint
+ * (Task 25), not here. The asymmetry is the point: a *counter* that cannot see
+ * an id fails **open**, while a *validator* that rejects one fails **closed**.
+ * Concretely, with a `[a-z0-9-]` class, `ck lv_size` next to `ck lv` counted as
+ * the single id `lv`, so `expectedTotal` landed one low, a truncated run read as
+ * complete, and the student was told a checkpoint passed that never ran. A
+ * strict class buys nothing here — a non-conforming id is not rejected, it is
+ * silently miscounted — so this accepts `_` and uppercase too and lets the lint
+ * be the loud half. Measured: widening it moves none of the six counts the bank
+ * pins (`assert.sh` 0; 019=8, 014=5, 017=5, 028=5, 006=8).
+ *
  * Known misses, all fail-*open* in the counting direction (they under-count, so
  * `incomplete` under-fires) and none of them used by any grader in the bank: a
- * `ck` after `then`, `do`, `else`, `{`, `(` or a line continuation, and an id
- * that breaks the `[a-z0-9-]` convention (`ck my_id` counts as `my`).
+ * `ck` after `then`, `do`, `else`, `{`, `(` or a line continuation.
  */
-const CK_CALL = /(?:^[ \t]*|[;&|][ \t]*)ck(?:_pass|_fail|_skip)?[ \t]+["']?([a-z0-9][a-z0-9-]*)/g
+const CK_CALL =
+  /(?:^[ \t]*|[;&|][ \t]*)ck(?:_pass|_fail|_skip)?[ \t]+["']?([A-Za-z0-9_][A-Za-z0-9_-]*)/g
 
 /** `<<EOF`, `<<-EOF` or `<<'EOF'`. `<<<` is a herestring and opens nothing. */
 const HEREDOC_START = /<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/

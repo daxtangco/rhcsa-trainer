@@ -102,6 +102,24 @@ describe('countCheckpoints', () => {
     expect(countCheckpoints('grep -q x <<<WORD\nck real "y" $?\n')).toBe(1)
   })
 
+  it('does not collide two ids that share a prefix across a non-convention character', () => {
+    // The collision, which is the dangerous half: with a `[a-z0-9-]` id class
+    // `ck lv_size` truncated to `lv`, collapsed into the `lv` already in the set
+    // and counted 1 where the grader emits 2. `expectedTotal` then lands one
+    // low, a run that stopped after the first checkpoint matches it, and the
+    // student is told they passed a checkpoint that never ran - the same
+    // fail-open as the heredoc and separator bugs, through a third door.
+    //
+    // Nothing else would catch it: `rhcsa validate`'s emitted-id check needs a
+    // VM, and the static lint that would reject the id does not exist yet.
+    expect(countCheckpoints('ck lv "d" $?\nck lv_size "d" $?\n')).toBe(2)
+    // Not the convention either, and previously counted as nothing at all.
+    expect(countCheckpoints('ck My-Id "d" $?\n')).toBe(1)
+    // Lowercase kebab remains what authors write; the counter is just permissive
+    // so that a non-conforming id is a lint error rather than a silent miscount.
+    expect(countCheckpoints('ck lv-size "d" $?\nck lv "d" $?\n')).toBe(2)
+  })
+
   it('finds no checkpoints in the assertion library that gets prepended to every grader', async () => {
     // loadTaskScripts hands `assertLib + grade.sh` to countCheckpoints, so an
     // example `ck` call in a comment-free line of assert.sh would inflate the
