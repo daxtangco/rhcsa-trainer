@@ -29,12 +29,13 @@ RHCSA_VM_IP=
 # Optional overrides; the defaults are usually right:
 RHCSA_SSH_USER=student
 #RHCSA_SSH_PORT=22
-#RHCSA_SSH_KEY="/home/user/.ssh/id_ed25519"
+#RHCSA_SSH_KEY=
 #RHCSA_TRANSPORT=
-# Path to vmrun.exe, if VMware is not in the default location. paths with spaces must be quoted:
+# Quote any value containing a space.
+# Path to vmrun.exe, if VMware is not in the default location:
 #RHCSA_VMRUN="/mnt/c/Program Files (x86)/VMware/VMware Workstation/vmrun.exe"
-# Read by this script only, never by the app itself - the DVD ISO's host path (must be quoted):
-#RHCSA_ISO="/mnt/c/ISO/rhel-9.6-x86_64-dvd.iso"
+# Read by this script only, never by the app itself - the DVD ISO's host path.
+#RHCSA_ISO=
 EOF
   echo "wrote a template .env.local - fill in RHCSA_VMX and RHCSA_GUEST_PASSWORD, then re-run"
 fi
