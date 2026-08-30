@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Created the accounts and stopped. sudo-devops fails as a consequence of the
-# missing membership, not on its own - which is worth seeing, because it shows
-# the checkpoints are not independent of each other.
+# Created the group and the accounts with the right aging, then stopped: nobody
+# was added to devops and no sudoers rule was written. So sudo-devops fails for
+# two independent reasons at once - alice is not in devops, and there is no
+# %devops rule for her to match even if she were. Both halves of the sudo answer
+# are missing, which is the common shape of a half-finished attempt.
 # expect-fail: alice-in-devops, bob-in-devops, carol-in-devops, sudo-devops
 set -euo pipefail
 sudo groupadd -g 5000 devops

@@ -20,14 +20,16 @@ ck bob-in-devops "bob is a member of devops" $?
 in_devops carol
 ck carol-in-devops "carol is a member of devops" $?
 
-# Field 8 of /etc/shadow is the expiry date in days since the epoch.
-# 2027-06-30 is what the prompt asks for; compare as a date, not as a string,
-# so any correct spelling of the date passes.
-want=$(date -u -d 2027-06-30 +%s)
+# Field 8 of /etc/shadow is the expiry date as a day count, not a timestamp, so
+# compare day counts. `date -d` is deliberately LOCAL, with no -u: shadow-utils
+# writes this field through strtoday(), which parses a bare YYYY-MM-DD as local
+# midnight and integer-divides by 86400, and both `chage -E` and `useradd -e`
+# go through it. Comparing against a UTC midnight instead is off by one day on
+# every guest ahead of UTC. Do not add -u here.
+want=$(( $(date -d 2027-06-30 +%s) / 86400 ))
 days=$(sudo getent shadow carol | cut -d: -f8)
-got=$([ -n "$days" ] && echo $((days * 86400)) || echo "")
-[ -n "$got" ] && [ "$got" = "$want" ]
-ck carol-expiry "carol's account expires 2027-06-30" $? "shadow field 8=${days:-empty}"
+[ -n "$days" ] && [ "$days" = "$want" ]
+ck carol-expiry "carol's account expires 2027-06-30" $? "shadow field 8=${days:-empty}, want=$want"
 
 max=$(sudo getent shadow alice | cut -d: -f5)
 [ "$max" = "30" ]
@@ -35,7 +37,15 @@ ck alice-maxdays "alice must change her password every 30 days" $? "maxdays=${ma
 
 # sudo -l -U asks the real sudoers parser what alice may run, so it does not
 # matter whether the rule is in /etc/sudoers or a file in /etc/sudoers.d.
-sudo sudo -l -U alice 2>/dev/null | grep -qE '\(ALL(:ALL)?\)[[:space:]]+(NOPASSWD:[[:space:]]*)?ALL'
+# The runas spec is matched loosely on purpose. All three of these are valid
+# sudoers that grant everything, and sudo -l renders them differently:
+#   %devops ALL=(ALL) ALL      -> (ALL) ALL
+#   %devops ALL=ALL            -> (root) ALL
+#   %devops ALL=(ALL:ALL) ALL  -> (ALL : ALL) ALL     (note the spaces)
+# so the runas user, the optional runas group and the whitespace around the
+# colon are all matched permissively. A non-ALL, non-root runas target still
+# fails, because that grants something narrower than the prompt asks for.
+sudo sudo -l -U alice 2>/dev/null | grep -qE '\((ALL|root)([[:space:]]*:[[:space:]]*(ALL|root))?\)[[:space:]]+(NOPASSWD:[[:space:]]*)?ALL'
 ck sudo-devops "members of devops may run any command with sudo" $?
 
 # Knowingly unprobed: an anti-solution that damages the student account destroys

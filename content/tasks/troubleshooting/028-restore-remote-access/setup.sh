@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Break three things, and record the connection name so grade.sh does not have
-# to guess it. Idempotent: every step is already the desired end state on a
-# second run.
+# to guess it. Idempotent with respect to a previous run of this script AND to a
+# previous run of any shipped solution: both spellings of the firewall answer are
+# removed below, not just the one the service name uses. It is not a claim about
+# arbitrary hand edits; the preconditions further down catch those by failing
+# loudly instead of by cleaning up.
 set -uo pipefail
 
 # No `set -e`: the cleanup commands above/below legitimately fail on a first run
@@ -36,8 +39,12 @@ need sudo chmod 0644 /etc/rhcsa-conn
 
 # 1. the service
 need sudo systemctl disable --now sshd
-# 2. the firewall
+# 2. the firewall - both spellings. solutions/02 opens ssh as --add-port=22/tcp
+# rather than --add-service=ssh, and the grader accepts either, so removing only
+# the service leaves a second run of this script tripping its own firewall-ssh
+# precondition below.
 sudo firewall-cmd --permanent --remove-service=ssh &>/dev/null
+sudo firewall-cmd --permanent --remove-port=22/tcp &>/dev/null
 sudo firewall-cmd --reload &>/dev/null
 # 3. the connection - autoconnect only, so the network stays up until the next
 #    boot. Taking the interface down here would make the break obvious and
@@ -53,9 +60,13 @@ need sudo usermod -aG wheel student
 # to do with the student, which is a student-facing false pass and not a
 # solved task (Task 21 finding F1).
 
-# sshd-enabled: exactly the grader's probe.
-systemctl is-enabled sshd &>/dev/null \
-  && fail "sshd is still enabled after 'systemctl disable'; sshd-enabled would pass at baseline"
+# sshd-enabled: the exact negation of the grader's probe, which anchors on the
+# string rather than on is-enabled's exit status. Kept in step with it on purpose;
+# if one is loosened the other has to be, or setup stops proving the checkpoint
+# starts red.
+if printf '%s' "$(systemctl is-enabled sshd 2>&1)" | grep -qx enabled; then
+  fail "sshd is still enabled after 'systemctl disable'; sshd-enabled would pass at baseline"
+fi
 
 # sshd-listening: the same probe the grader uses. This is the check that catches
 # a guest where sshd.socket is enabled - disabling sshd.service alone leaves
@@ -72,6 +83,45 @@ sudo systemctl is-active firewalld &>/dev/null \
 perm=$(sudo firewall-cmd --permanent --list-all 2>/dev/null)
 if grep -qw ssh <<<"$perm" || grep -qw 22/tcp <<<"$perm"; then
   fail "the permanent firewall config still permits ssh; firewall-ssh would pass at baseline"
+fi
+
+# firewall-ssh, continued. `firewall-cmd` with no --zone reads and writes the
+# DEFAULT zone, and so does the grader's probe above. If this guest's NIC is
+# bound to some other zone, the canonical answer
+# `firewall-cmd --permanent --add-service=ssh` writes the default zone, the
+# checkpoint goes green, and the traffic is still dropped by the zone that
+# actually filters the interface. That is a student-facing false PASS - the one
+# failure direction this project treats as unacceptable - so it is checked here
+# rather than assumed. docs/vm-build-checklist.md pins no zone.
+defzone=$(sudo firewall-cmd --get-default-zone 2>/dev/null)
+[ -n "$defzone" ] \
+  || fail "cannot read the default firewalld zone, which is the zone every firewall checkpoint in this task measures"
+
+# The device is derived, never hardcoded. An active connection reports it in
+# GENERAL.DEVICES; a profile that pins one reports connection.interface-name.
+dev=$(nmcli -g GENERAL.DEVICES connection show "$conn" 2>/dev/null | head -1)
+[ -n "$dev" ] || dev=$(nmcli -g connection.interface-name connection show "$conn" 2>/dev/null | head -1)
+
+# The permanent half, and the one that matters most here because firewall-ssh is
+# itself a permanent check: connection.zone re-binds the interface at every boot,
+# so a profile pinning a non-default zone survives a reload that would hide it.
+czone=$(nmcli -g connection.zone connection show "$conn" 2>/dev/null)
+if [ -n "$czone" ] && [ "$czone" != "$defzone" ]; then
+  fail "connection '$conn' pins firewalld zone '$czone', not the default zone '$defzone', so firewall-ssh would pass while ssh stayed blocked; this guest was not built to docs/vm-build-checklist.md"
+fi
+
+# The runtime half. --get-active-zones lists only zones with something bound, so
+# an interface appearing under NO zone is handled by the default zone, which is
+# what the grader assumes; an interface listed under a DIFFERENT zone is the
+# hazard.
+if [ -n "$dev" ]; then
+  otherzone=$(sudo firewall-cmd --get-active-zones 2>/dev/null | awk -v i="$dev" -v d="$defzone" '
+    /^[^[:space:]]/ { z=$1; next }
+    $1 == "interfaces:" { for (n=2; n<=NF; n++) if ($n == i && z != d) print z }' | head -1)
+  [ -z "$otherzone" ] \
+    || fail "interface $dev is in firewalld zone '$otherzone', not the default zone '$defzone', so firewall-ssh would pass while ssh stayed blocked; this guest was not built to docs/vm-build-checklist.md"
+else
+  fail "cannot determine which interface connection '$conn' uses, so it is not possible to prove firewall-ssh measures the zone that filters this guest's traffic"
 fi
 
 # net-autoconnect: exactly the grader's probe, against the name it will read

@@ -113,6 +113,47 @@ sudo firewall-cmd --list-ports 2>/dev/null | grep -qw 82/tcp \
 sudo firewall-cmd --permanent --list-ports 2>/dev/null | grep -qw 82/tcp \
   && fail "82/tcp is still open in the permanent firewall config; firewall-permanent would pass at baseline"
 
+# firewall-runtime and firewall-permanent, continued. Both probes above and both
+# grader checkpoints read the DEFAULT zone, because firewall-cmd with no --zone
+# does. This task's prompt promises port 82 is reachable from other machines, and
+# the grader only ever curls localhost, which firewalld does not filter at all.
+# So on a guest whose NIC is bound to a non-default zone, the student's correct
+# `--add-port=82/tcp` writes a zone that filters nothing, both checkpoints go
+# green, and the port is still closed to the outside. That is a student-facing
+# false PASS, which is the one failure direction this project treats as
+# unacceptable. docs/vm-build-checklist.md pins no zone, so it is checked here.
+defzone=$(sudo firewall-cmd --get-default-zone 2>/dev/null)
+[ -n "$defzone" ] \
+  || fail "cannot read the default firewalld zone, which is the zone both firewall checkpoints measure"
+
+# Derived, never hardcoded: the device behind the active NetworkManager
+# connection, falling back to the device on the default route.
+dev=$(nmcli -g DEVICE connection show --active 2>/dev/null | head -1)
+[ -n "$dev" ] \
+  || dev=$(ip -o route show default 2>/dev/null | awk '{for (n=1; n<NF; n++) if ($n == "dev") { print $(n+1); exit }}')
+
+if [ -n "$dev" ]; then
+  # --get-active-zones lists only zones with something bound, so an interface
+  # under NO zone is handled by the default zone, which is what the checkpoints
+  # assume; an interface under a DIFFERENT zone is the hazard.
+  otherzone=$(sudo firewall-cmd --get-active-zones 2>/dev/null | awk -v i="$dev" -v d="$defzone" '
+    /^[^[:space:]]/ { z=$1; next }
+    $1 == "interfaces:" { for (n=2; n<=NF; n++) if ($n == i && z != d) print z }' | head -1)
+  [ -z "$otherzone" ] \
+    || fail "interface $dev is in firewalld zone '$otherzone', not the default zone '$defzone', so both firewall checkpoints would pass while port 82 stayed closed to other machines; this guest was not built to docs/vm-build-checklist.md"
+  # firewall-permanent survives a reboot, and so does connection.zone: a profile
+  # pinning a non-default zone re-binds the interface every boot.
+  aconn=$(nmcli -g NAME connection show --active 2>/dev/null | head -1)
+  if [ -n "$aconn" ]; then
+    czone=$(nmcli -g connection.zone connection show "$aconn" 2>/dev/null)
+    if [ -n "$czone" ] && [ "$czone" != "$defzone" ]; then
+      fail "connection '$aconn' pins firewalld zone '$czone', not the default zone '$defzone', so both firewall checkpoints would pass while port 82 stayed closed to other machines; this guest was not built to docs/vm-build-checklist.md"
+    fi
+  fi
+else
+  fail "cannot determine this guest's primary network interface, so it is not possible to prove the firewall checkpoints measure the zone that filters inbound traffic to port 82"
+fi
+
 cat /dev/null > ~/.bash_history 2>/dev/null || true
 history -c 2>/dev/null || true
 exit 0

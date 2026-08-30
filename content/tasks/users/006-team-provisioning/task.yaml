@@ -22,8 +22,7 @@ prompt: |
   Three people are joining the devops team.
 
   - Create a group named devops with GID 5000.
-  - Create users alice and bob. Both must be members of devops in
-    addition to their own primary groups.
+  - Create users alice and bob. Both must be members of devops.
   - Create a user carol whose account expires on 2027-06-30 and who is a
     member of devops.
   - alice must be forced to change her password at least every 30 days.

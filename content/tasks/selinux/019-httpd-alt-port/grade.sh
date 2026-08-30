@@ -8,8 +8,13 @@
 # baseline-fail: httpd-enabled, page-served, port-labeled, context-now, context-permanent, firewall-runtime, firewall-permanent
 set -uo pipefail
 
-systemctl is-enabled httpd &>/dev/null
-ck httpd-enabled "httpd is enabled at boot" $? "is-enabled=$(systemctl is-enabled httpd 2>&1)"
+# Anchored on the exact string, not on is-enabled's exit status, which is also 0
+# for static, indirect, generated, alias and enabled-runtime. Only "enabled"
+# means a symlink in /etc that survives a reboot, which is what the checkpoint
+# name claims. Same spelling as systemd/017's stamp-enabled.
+state=$(systemctl is-enabled httpd 2>&1)
+printf '%s' "$state" | grep -qx enabled
+ck httpd-enabled "httpd is enabled at boot" $? "is-enabled=$state"
 
 # The grader runs inside the guest, and firewalld does not filter loopback, so
 # this proves Apache serves the right directory and nothing about the firewall.

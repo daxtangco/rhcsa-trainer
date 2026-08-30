@@ -23,6 +23,7 @@ prompt: |
   - Create a systemd service named rhcsa-stamp.service that runs it once at
     every boot.
   - The service must start automatically. Nobody is going to run it by hand.
+  - Make sure it has already run, not just that it will run at the next boot.
   - Make sure the system boots to a text login, not a graphical one.
 
   Leave sshd alone.

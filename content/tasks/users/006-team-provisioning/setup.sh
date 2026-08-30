@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Remove any prior attempt so the task is repeatable, and prove the names are
-# free before the student is told to create them.
+# free before the student is told to create them. "Any prior attempt" means
+# every artefact the shipped solutions and antisolutions create: the three
+# accounts, the group, /etc/sudoers.d/devops, and a %devops line appended to
+# /etc/sudoers by solutions/02. It is not a claim about arbitrary changes a
+# student might have made by hand; the preconditions below are what catch those,
+# by failing loudly rather than by cleaning up.
 set -uo pipefail
 
 # No `set -e`: the cleanup commands above/below legitimately fail on a first run
@@ -22,6 +27,14 @@ done
 getent group devops &>/dev/null && sudo groupdel devops
 sudo rm -f /etc/sudoers.d/devops
 
+# solutions/02 grants sudo by appending %devops to /etc/sudoers itself rather
+# than by dropping a file in /etc/sudoers.d, so removing the drop-in is not
+# enough to undo it. Without this line a second run trips its own %devops
+# precondition below and exits 1. Same class as the fcontext -e cleanup in
+# selinux/019's setup: idempotent with respect to a prior *solution*, not just
+# with respect to a prior setup.
+sudo sed -i '/^[[:space:]]*%devops/d' /etc/sudoers
+
 # The task says not to touch student; make sure it starts correct so the
 # invariant checkpoint means something.
 need sudo usermod -aG wheel student
@@ -41,8 +54,10 @@ if getent group 5000 &>/dev/null; then
   fail "GID 5000 is already taken by group '$(getent group 5000 | cut -d: -f1)'; this guest was not built to docs/vm-build-checklist.md"
 fi
 
-# alice-in-devops, bob-in-devops, carol-in-devops, carol-expiry: all four are
-# satisfied at baseline only because the accounts do not exist yet.
+# alice-in-devops, bob-in-devops, carol-in-devops: all three are satisfied at
+# baseline only because the accounts do not exist yet. carol-expiry needs the
+# account to be absent too, but absence alone is not sufficient for it - see the
+# EXPIRE guard below.
 for u in alice bob carol; do
   ! id "$u" &>/dev/null || fail "user $u still exists after userdel"
 done
@@ -54,6 +69,23 @@ done
 maxdef=$(awk '$1 == "PASS_MAX_DAYS" { print $2 }' /etc/login.defs 2>/dev/null | tail -n1)
 if [ "${maxdef:-}" = "30" ]; then
   fail "/etc/login.defs sets PASS_MAX_DAYS 30, so useradd alone would satisfy alice-maxdays"
+fi
+
+# carol-expiry: the exact analogue of the guard above. EXPIRE= in
+# /etc/default/useradd is the default `useradd -e`, so a guest that already sets
+# it to the date the prompt asks for would satisfy carol-expiry from a bare
+# `useradd carol` and the expiry half of the task would grade as done when
+# nobody set an expiry. Compared as a day count in LOCAL time for the same
+# reason grade.sh does - see the strtoday note there. Any other date is
+# harmless: carol-expiry still starts red and the student still has to fix it.
+expdef=$(awk -F= '$1 == "EXPIRE" { print $2 }' /etc/default/useradd 2>/dev/null | tail -n1)
+if [ -n "${expdef:-}" ]; then
+  wantday=$(( $(date -d 2027-06-30 +%s) / 86400 ))
+  if expsecs=$(date -d "$expdef" +%s 2>/dev/null); then
+    if [ "$(( expsecs / 86400 ))" = "$wantday" ]; then
+      fail "/etc/default/useradd sets EXPIRE=$expdef, so useradd alone would satisfy carol-expiry"
+    fi
+  fi
 fi
 
 # sudo-devops: nothing may already grant devops members full sudo, and the
