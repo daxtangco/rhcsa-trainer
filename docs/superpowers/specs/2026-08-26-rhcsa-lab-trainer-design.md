@@ -219,7 +219,7 @@ under WSL is obstructed by the absence of `genisoimage`.
 | Disk 0 | 40 GB, LVM | System. Sized to leave free extents in the VG for resize labs |
 | Disks 1–3 | 2 GB, 2 GB, 8 GB | Spares for partitioning, PV/VG/LV, swap, multi-disk VG labs |
 | Firmware | BIOS | Simpler GRUB labs. `rd.break` and `init=/bin/bash` procedures are identical under UEFI, so nothing exam-relevant is lost |
-| Network | NAT (VMnet8) | See risk R1 |
+| Network | NAT (VMnet8) | Host-routing confirmed reachable; see `docs/r1-findings.md` |
 | Guest tools | `open-vm-tools` | Mandatory — `runProgramInGuest` depends on it |
 | SELinux | `enforcing` | Exam default. Never relaxed |
 
@@ -1031,7 +1031,7 @@ book.
 
 | ID | Risk | Impact | Mitigation |
 |---|---|---|---|
-| R1 | WSL2 cannot reach the VM on VMnet8 | Blocks SSH transport and the terminal | Verify in Phase 0. Fallbacks: bridged networking, VMware NAT port-forward, or `vmrun`-only operation |
+| R1 | WSL2 cannot reach the VM on VMnet8 | Blocks SSH transport and the terminal | Resolved for host routing: WSL2 reaches the VMnet8 host adapter with 0% loss (see `docs/r1-findings.md`). Guest-side reachability is deferred to the RHEL VM's first boot, since the probe subject (an unrelated pre-existing Ubuntu VM) has no `open-vm-tools` to test against. Fallbacks if it fails there: bridged networking, VMware NAT port-forward, or `vmrun`-only operation |
 | R2 | Exam is actually the RHEL 10 revision | ~1 chapter stale in each direction; Flatpak absent; dnf5 differences | `rhel: 9` field from day one makes version filtering additive. RHCSA 10 edition on hand as the Flatpak source. Revisit on booking |
 | R3 | Host memory pressure (15 GB total) | Sluggish VM or WSL | Cap WSL at 4 GB via `.wslconfig`; VM at 4 GB |
 | R4 | Graders over-fitted to one solution | Trains brittle habits | Multiple `solutions/` required per task, sourced from both editions; enforced by `validate` |
