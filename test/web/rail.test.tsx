@@ -326,7 +326,11 @@ describe('Rail', () => {
       regressionCount: 0,
     }
     render(<Rail {...props} session={session({ rebootCheck: false })} rung={1} report={report} />)
-    expect(screen.getByText(/all checkpoints passed/i)).toBeDefined()
+    // Anchored, not a substring. `/all checkpoints passed/i` also matches the
+    // rose "Not all checkpoints passed." - so the mutant that swaps the pass
+    // verdict for the fail verdict passed all 28 tests, in the only direction
+    // that tells a student who solved the lab that they did not.
+    expect(screen.getByText('All checkpoints passed.')).toBeDefined()
     expect(screen.queryByText(/reboot check did not run/i)).toBeNull()
   })
 
@@ -343,6 +347,9 @@ describe('Rail', () => {
       regressionCount: 0,
     }
     render(<Rail {...props} session={session()} rung={1} report={report} />)
-    expect(screen.getByText(/all checkpoints passed/i)).toBeDefined()
+    // Anchored for the same reason as above: this is the one test whose whole job
+    // is to tell the pass verdict from the fail verdict.
+    expect(screen.getByText('All checkpoints passed.')).toBeDefined()
+    expect(screen.queryByText('Not all checkpoints passed.')).toBeNull()
   })
 })

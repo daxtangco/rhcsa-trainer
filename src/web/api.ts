@@ -1,8 +1,10 @@
 // Type-only, so `verbatimModuleSyntax` erases it and no server code reaches the
 // bundle. One definition: a mode the ladder gains must not be a mode the picker
-// silently cannot offer.
-import type { SessionMode } from '../server/session.ts'
-export type { SessionMode }
+// silently cannot offer, and a phase the session gains must not be a phase the
+// screen compares against with a typo nobody catches - `phase: string` would let
+// `phase === 'gradedd'` compile and silently never match.
+import type { SessionMode, SessionPhase } from '../server/session.ts'
+export type { SessionMode, SessionPhase }
 
 export interface TaskSummary {
   id: string
@@ -56,7 +58,14 @@ export interface SessionView {
   checkpointTotal: number
   startedAt: number
   endedAt?: number
-  phase: string
+  /**
+   * `'graded'` is terminal: `POST /finish` sets it, and both `/finish` and
+   * `/reset` answer 409 afterwards. This, not the rating, is what the screen
+   * reads to decide an attempt is over — `rating` is null for guided mode by
+   * design (`app.ts`'s `if (s.mode !== 'guided')`), so keying anything to it
+   * makes the guard mode-dependent.
+   */
+  phase: SessionPhase
 }
 
 /** One concept card, named but not opened. `/api/tasks/:area/:slug` returns these. */
@@ -121,7 +130,7 @@ export interface GradeReportView {
  * that always arrives is as much of a lie as one that never does.
  */
 export interface GradeResponse extends GradeReportView {
-  phase: string
+  phase: SessionPhase
   rung: number
 }
 

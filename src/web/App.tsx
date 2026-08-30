@@ -31,14 +31,18 @@ export function App() {
   const [elapsedS, setElapsedS] = useState(0)
   const [report, setReport] = useState<GradeReportView>()
   const [rating, setRating] = useState<string | null>(null)
+  // The session's phase, as the server last reported it. Deriving this from
+  // `rating !== null` was a measured false fail: `app.ts` returns `rating: null`
+  // for guided mode, so every guard below was inert in the one mode a beginner
+  // uses first - a guided lab solved in four minutes ended with the rail saying
+  // "over budget", and a second F4 hit the 409 whose error handler wiped the
+  // earned tally off the screen. Phase is not mode-dependent, so a mode added
+  // later cannot reopen the hole.
+  const [finished, setFinished] = useState(false)
   const [hint, setHint] = useState<RungContentView[]>([])
   const [busy, setBusy] = useState<Busy>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  // The attempt is over and a rating has been derived from it. Everything that
-  // could contradict that rating is switched off below.
-  const finished = rating !== null
 
   useEffect(() => {
     api
@@ -53,8 +57,9 @@ export function App() {
 
   // One timer for the whole session. It counts wall-clock time, including the
   // time spent reading a hint, because the exam clock does too. It stops at
-  // finish: a clock that keeps climbing past a recorded rating - and eventually
-  // flips the rail to "over budget" - describes an attempt that is already over.
+  // finish: a clock that keeps climbing after the attempt is closed - and
+  // eventually flips the rail to "over budget" on a lab the student solved -
+  // describes an attempt that is already over.
   useEffect(() => {
     if (session === undefined || finished) return
     const started = Date.now()
@@ -71,6 +76,7 @@ export function App() {
       setRung(s.rung)
       setReport(undefined)
       setRating(null)
+      setFinished(false)
       setHint([])
       setCard(undefined)
       setElapsedS(0)
@@ -136,6 +142,11 @@ export function App() {
       setRung(s.rung)
       setReport(undefined)
       setRating(null)
+      // Read back from the server rather than assumed: `/reset` answers 409 on a
+      // graded session, so a reset that returned at all means the phase is
+      // `active`. Taking the value from the response keeps this true even if that
+      // rule ever changes.
+      setFinished(s.phase === 'graded')
       setElapsedS(0)
     } catch (e: unknown) {
       setError(message(e))
@@ -173,6 +184,9 @@ export function App() {
       const done = await api.finish(session.id)
       setReport(done.report)
       setRating(done.rating)
+      // The phase, not the rating. Guided finishes with `rating: null` and is
+      // just as over as any other mode.
+      setFinished(done.phase === 'graded')
     } catch (e: unknown) {
       setError(message(e))
     } finally {
@@ -187,7 +201,7 @@ export function App() {
       // A finished attempt is closed to the keyboard too. Disabling the buttons
       // and leaving the shortcuts live would be a hole exactly the shape of the
       // thing being prevented.
-      if (session === undefined || rating !== null) return
+      if (session === undefined || finished) return
       if (e.key === 'F2') {
         e.preventDefault()
         void doHint()
@@ -201,7 +215,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [session, rating, doHint, doGrade, doFinish])
+  }, [session, finished, doHint, doGrade, doFinish])
 
   if (session === undefined) {
     return <TaskPicker tasks={tasks} error={error} busy={starting} onStart={start} />
@@ -253,13 +267,29 @@ export function App() {
               </pre>
             </div>
           ) : null}
-          {rating !== null ? (
+          {/*
+            Keyed to `finished`, not to `rating`. Guided mode is finished with no
+            rating, and a finished attempt that says nothing about being finished
+            is how the clock was left running on a solved lab.
+          */}
+          {finished ? (
             <div className="m-2 rounded border border-zinc-700 bg-zinc-900 p-4 text-sm text-zinc-200">
-              Attempt finished. Scheduler rating: <strong>{rating}</strong>. This is derived from
-              the grade, the rung you needed and the time you took — nothing here is self-reported.
+              {rating !== null ? (
+                <>
+                  Attempt finished. Scheduler rating: <strong>{rating}</strong>. This is derived
+                  from the grade, the rung you needed and the time you took — nothing here is
+                  self-reported.{' '}
+                </>
+              ) : (
+                <>
+                  Attempt finished. Guided mode records no scheduler rating: it hands you the
+                  solution, so how fast you got there says nothing about whether you can do it
+                  cold. Run the same task in practice or drill mode when you want one.{' '}
+                </>
+              )}
               Hint, Grade and Reset are inactive from here, and so are F2, F4 and F8: grading again
-              would change the report this rating was derived from. Start a new session to attempt
-              the task again.
+              would change the report this attempt was recorded against. Start a new session to
+              attempt the task again.
             </div>
           ) : null}
         </main>
