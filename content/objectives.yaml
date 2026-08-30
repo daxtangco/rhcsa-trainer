@@ -1,0 +1,261 @@
+# RHEL 9 / EX200 objective taxonomy.
+#
+# THE IDS IN THIS FILE ARE PERMANENT. They are the FSRS scheduling keys, so
+# renaming one orphans a user's entire review history. Add new ids; never
+# rename or reuse an existing one for a different objective.
+#
+# Transcribed 1:1 from "Table 1 Coverage of RHCSA Objectives" in the RHCSA 9
+# Cert Guide (PDF pages 39-45). One entry per published bullet: no bullet was
+# merged with another and none was split.
+#
+# On provenance: the brief's source priority put Red Hat's published EX200
+# objectives above the book's wording. Red Hat's page was reachable
+# (2026-08-30) but it no longer publishes the RHEL 9 objective set - it now
+# publishes the RHEL 10 set (containers gone, a "Manage software" Flatpak
+# section added). It therefore cannot arbitrate RHEL 9 wording, and `text:`
+# below is the book's throughout. Objectives that have since disappeared from
+# Red Hat's page are flagged `# gone in RHEL 10` so the R2 delta is visible
+# from this file too; see content/objectives-rhel10.yaml for the full delta.
+version: rhel9
+source: "RHCSA 9 Cert Guide 'Table 1 Coverage of RHCSA Objectives', PDF pages 39-45 (read visually with the Read tool; cross-checked against the PDF text layer). Red Hat's published EX200 objectives page was reachable on 2026-08-30 but now states the RHEL 10 objective set rather than RHEL 9's, so it could not arbitrate RHEL 9 wording; text is the book's throughout. Chapters for 'Manage default file permissions' and 'Manage SELinux port labels' come from the Chapter 7 and Chapter 22 openers, because Table 1 leaves the chapter cell of both rows blank."
+objectives:
+  # --- Understand and use essential tools ---
+  - id: tools.shell.prompt
+    text: "Access a shell prompt and issue commands with correct syntax"
+    chapters: [2]
+  - id: tools.shell.redirection
+    text: "Use input-output redirection (>, >>, |, 2>, etc.)"
+    chapters: [2]
+  - id: tools.text.grep
+    text: "Use grep and regular expressions to analyze text"
+    chapters: [4]
+  - id: tools.ssh.client
+    text: "Access remote systems using SSH"
+    chapters: [5]
+  - id: users.login.switch
+    text: "Log in and switch users in multiuser targets"
+    chapters: [5]
+  # Red Hat's current page drops `star` from this bullet; see the rhel10 file.
+  - id: tools.archive.tar
+    text: "Archive, compress, unpack, and uncompress files using tar, star, gzip, and bzip2"
+    chapters: [3]
+  - id: tools.editor.vim
+    text: "Create and edit text files"
+    chapters: [4]
+  - id: files.manage.copy-move
+    text: "Create, delete, copy, and move files and directories"
+    chapters: [3]
+  - id: files.links.create
+    text: "Create hard and soft links"
+    chapters: [3]
+  - id: files.permissions.ugo-rwx
+    text: "List, set, and change standard ugo/rwx permissions"
+    chapters: [7]
+  - id: tools.man.documentation
+    text: "Locate, read, and use system documentation including man, info, and files in /usr/share/doc"
+    chapters: [2]
+
+  # --- Create simple shell scripts ---
+  - id: tools.script.conditionals
+    text: "Conditionally execute code (use of: if, test, [], etc.)"
+    chapters: [19]
+  - id: tools.script.loops
+    text: "Use Looping constructs (for, etc.) to process file, command line input"
+    chapters: [19]
+  - id: tools.script.inputs
+    text: "Process script inputs ($1, $2, etc.)"
+    chapters: [19]
+  - id: tools.script.command-output
+    text: "Processing output of shell commands within a script"
+    chapters: [19]
+
+  # --- Operate running systems ---
+  - id: boot.lifecycle.shutdown
+    text: "Boot, reboot, and shut down a system normally"
+    chapters: [5]
+  - id: boot.targets.manual
+    text: "Boot systems into different targets manually"
+    chapters: [18]
+  - id: boot.rescue.interrupt
+    text: "Interrupt the boot process in order to gain access to a system"
+    chapters: [18]
+  - id: sys.proc.kill
+    text: "Identify CPU/memory intensive processes and kill processes"
+    chapters: [10]
+  - id: sys.proc.scheduling
+    text: "Adjust process scheduling"
+    chapters: [10]
+  - id: sys.tuned.profiles
+    text: "Manage tuning profiles"
+    chapters: [10]
+  - id: sys.logs.journal
+    text: "Locate and interpret system log files and journals"
+    chapters: [13]
+  - id: sys.logs.persistent-journal
+    text: "Preserve system journals"
+    chapters: [13]
+  - id: systemd.services.network
+    text: "Start, stop, and check the status of network services"
+    chapters: [8]
+  - id: net.ssh.transfer
+    text: "Securely transfer files between systems"
+    chapters: [5]
+
+  # --- Configure local storage ---
+  # Red Hat's current page narrows this to GPT only; see the rhel10 file.
+  - id: storage.partitions.mbr-gpt
+    text: "List, create, and delete partitions on MBR and GPT disks"
+    chapters: [14]
+  - id: storage.lvm.pv
+    text: "Create and remove physical volumes"
+    chapters: [15]
+  - id: storage.lvm.vg
+    text: "Assign physical volumes to volume groups"
+    chapters: [15]
+  - id: storage.lvm.lv
+    text: "Create and delete logical volumes"
+    chapters: [15]
+  - id: storage.fstab.uuid-label
+    text: "Configure systems to mount file systems at boot by universally unique ID (UUID) or label"
+    chapters: [14]
+  - id: storage.swap.nondestructive
+    text: "Add new partitions and logical volumes, and swap to a system nondestructively"
+    chapters: [14]
+
+  # --- Create and configure file systems ---
+  - id: storage.filesystems.create-mount
+    text: "Create, mount, unmount, and use vfat, ext4, and xfs file systems"
+    chapters: [14]
+  - id: storage.nfs.mount
+    text: "Mount and unmount network file systems using NFS"
+    chapters: [24]
+  - id: storage.autofs.configure
+    text: "Configure autofs"
+    chapters: [24]
+  - id: storage.lvm.resize
+    text: "Extend existing logical volumes"
+    chapters: [15]
+  # gone in RHEL 10: absent from both the RHCSA 10 Table 1 and Red Hat's
+  # current published objectives.
+  - id: files.permissions.set-gid
+    text: "Create and configure set-GID directories for collaboration"
+    chapters: [7]
+  - id: files.permissions.troubleshoot
+    text: "Diagnose and correct file permission problems"
+    chapters: [7]
+
+  # --- Deploy, configure, and maintain systems ---
+  # Red Hat's current page adds systemd timer units here; see the rhel10 file.
+  - id: sys.cron.schedule
+    text: "Schedule tasks using at and cron"
+    chapters: [12]
+  - id: systemd.services.enable
+    text: "Start and stop services and configure services to start automatically at boot"
+    chapters: [11]
+  - id: boot.targets.default
+    text: "Configure systems to boot into a specific target automatically"
+    chapters: [17]
+  - id: sys.time.chrony
+    text: "Configure time service clients"
+    chapters: [25]
+  # "Red Hat Network" was renamed "Red Hat Content Delivery Network" by RHEL 10.
+  - id: pkg.dnf.install
+    text: "Install and update software packages from Red Hat Network, a remote repository, or from the local file system"
+    chapters: [9]
+  - id: boot.grub.modify
+    text: "Modify the system bootloader"
+    chapters: [17]
+
+  # --- Manage basic networking ---
+  - id: net.addressing.ipv4-ipv6
+    text: "Configure IPv4 and IPv6 addresses"
+    chapters: [8]
+  - id: net.hostname.resolution
+    text: "Configure hostname resolution"
+    chapters: [8]
+  - id: net.services.autostart
+    text: "Configure network services to start automatically at boot"
+    chapters: [8]
+  - id: net.firewall.restrict-access
+    text: "Restrict network access using firewall-cmd/firewall"
+    chapters: [23]
+
+  # --- Manage users and groups ---
+  - id: users.accounts.manage
+    text: "Create, delete, and modify local user accounts"
+    chapters: [6]
+  - id: users.passwords.aging
+    text: "Change passwords and adjust password aging for local user accounts"
+    chapters: [6]
+  - id: users.groups.manage
+    text: "Create, delete, and modify local groups and group memberships"
+    chapters: [6]
+  # Renamed "Configure privileged access" in RHEL 10.
+  - id: users.sudo.superuser
+    text: "Configure superuser access"
+    chapters: [6]
+
+  # --- Manage security ---
+  - id: net.firewall.settings
+    text: "Configure firewall settings using firewall-cmd/firewalld"
+    chapters: [23]
+  # Table 1 leaves this row's Chapter Title and Chapter cells blank; chapter 7
+  # comes from the Chapter 7 opener, which lists "Manage default permissions".
+  - id: files.permissions.umask
+    text: "Manage default file permissions"
+    chapters: [7]
+  - id: net.ssh.key-auth
+    text: "Configure key-based authentication for SSH"
+    chapters: [20]
+  - id: selinux.modes.enforcing-permissive
+    text: "Set enforcing and permissive modes for SELinux"
+    chapters: [22]
+  - id: selinux.contexts.identify
+    text: "List and identify SELinux file and process context"
+    chapters: [22]
+  - id: selinux.contexts.restore
+    text: "Restore default file contexts"
+    chapters: [22]
+  # Table 1 leaves this row's Chapter Title and Chapter cells blank too;
+  # chapter 22 comes from the Chapter 22 opener, which lists this objective.
+  - id: selinux.ports.labels
+    text: "Manage SELinux port labels"
+    chapters: [22]
+  - id: selinux.booleans.modify
+    text: "Use Boolean settings to modify system SELinux settings"
+    chapters: [22]
+  # gone in RHEL 10: absent from both the RHCSA 10 Table 1 and Red Hat's
+  # current published objectives.
+  - id: selinux.troubleshoot.violations
+    text: "Diagnose and address routine SELinux policy violations"
+    chapters: [22]
+
+  # --- Manage containers ---
+  # The whole "Manage containers" section is gone in RHEL 10: Red Hat's current
+  # published objectives have no containers section at all, and the RHCSA 10
+  # Cert Guide has no containers chapter (its chapter 26 is Final Preparation).
+  # This block is risk R2's entire blast radius - eight objectives.
+  - id: containers.images.registry
+    text: "Find and retrieve container images from a remote registry"
+    chapters: [26]
+  - id: containers.images.inspect
+    text: "Inspect container images"
+    chapters: [26]
+  - id: containers.podman.manage
+    text: "Perform container management using commands such as podman and skopeo"
+    chapters: [26]
+  - id: containers.build.containerfile
+    text: "Build a container from a Containerfile"
+    chapters: [26]
+  - id: containers.lifecycle.run
+    text: "Perform basic container management such as running, starting, stopping, and listing running containers"
+    chapters: [26]
+  - id: containers.service.run
+    text: "Run a service inside a container"
+    chapters: [26]
+  - id: containers.systemd.autostart
+    text: "Configure a container to start automatically as a systemd service"
+    chapters: [26]
+  - id: containers.storage.persistent
+    text: "Attach persistent storage to a container"
+    chapters: [26]

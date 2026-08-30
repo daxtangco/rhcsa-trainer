@@ -1,0 +1,287 @@
+# RHEL 10 / EX200 objective taxonomy - the enumeration of risk R2.
+#
+# Nothing loads this file yet. It exists so the RHEL 9 -> RHEL 10 delta is
+# enumerated rather than guessed (spec 16, Phase 0).
+#
+# READ THIS FIRST - the delta is larger than the plan assumed, and in one
+# direction the plan was wrong:
+#
+#   1. `containers.*` is GONE. Red Hat's currently published EX200 objectives
+#      have no "Manage containers" section at all, and the RHCSA 10 Cert Guide
+#      has no containers chapter (its chapter 26 is Final Preparation, where the
+#      RHCSA 9 edition's chapter 26 was Managing Containers). All eight RHEL 9
+#      containers objectives are dropped. The plan's guess held.
+#
+#   2. Flatpak IS present - but NOT in the book's Table 1. The RHCSA 10 Cert
+#      Guide's Table 1 has no Flatpak row anywhere. The four RPM/Flatpak
+#      objectives below come from the book's Chapter 9 opener ("THE FOLLOWING
+#      RHCSA EXAM OBJECTIVE IS COVERED IN THIS CHAPTER"), and Red Hat's
+#      published page confirms them as a distinct "Manage software" section.
+#      Table 1 is simply out of sync with the rest of the RHCSA 10 book.
+#
+#   3. Red Hat's published EX200 objectives page is ALREADY the RHEL 10 set.
+#      Fetched 2026-08-30, it matches this file bullet for bullet - 62 bullets,
+#      no containers, with a "Manage software" section. R2 is not a future
+#      possibility on Red Hat's side; it is the current published contract.
+#
+# Also dropped relative to RHEL 9, beyond containers:
+#   - "Create and configure set-GID directories for collaboration"
+#   - "Diagnose and address routine SELinux policy violations"
+#
+# Ids are reused wherever the objective is unchanged, so a diff of this file
+# against objectives.yaml is meaningful. Where the wording changed
+# substantively, the entry gets its own id and a comment saying what changed -
+# reusing an id whose meaning moved would silently understate the delta.
+#
+# `text:` follows Red Hat's published wording (the contractual statement of what
+# is testable); `chapters:` comes from the RHCSA 10 Cert Guide. Where the two
+# disagree, the disagreement is recorded in a comment on the entry.
+version: rhel10
+source: "RHCSA 10 Cert Guide 'Table 1 Coverage of RHCSA Objectives', PDF pages 43-49 - rendered images, so read visually (pdftotext returns an empty body for them); the six unique page images were also extracted with pdfimages and read directly to rule out crop loss at the page seams. Wording follows Red Hat's published EX200 objectives page, fetched successfully 2026-08-30, which now states the RHEL 10 set; the book supplies chapter numbers. The four 'Manage software' RPM/Flatpak objectives are absent from the book's Table 1 and were taken from the book's Chapter 9 opener, which lists them as RHCSA exam objectives; Red Hat's page independently confirms them."
+objectives:
+  # --- Understand and use essential tools ---
+  - id: tools.shell.prompt
+    text: "Access a shell prompt and issue commands with correct syntax"
+    chapters: [2]
+  - id: tools.shell.redirection
+    text: "Use input-output redirection (>, >>, |, 2>, etc.)"
+    chapters: [2]
+  - id: tools.text.grep
+    text: "Use grep and regular expressions to analyze text"
+    chapters: [4]
+  - id: tools.ssh.client
+    text: "Access remote systems using SSH"
+    chapters: [5]
+  # Red Hat writes "multi-user", the book "multiuser". Orthographic only, so the
+  # id is reused.
+  - id: users.login.switch
+    text: "Log in and switch users in multi-user targets"
+    chapters: [5]
+  # CHANGED: `star` is dropped from the tool list (RHEL 10 ships no star). New
+  # id, because the RHEL 9 id names a wider objective.
+  - id: tools.archive.tar-gzip-bzip2
+    text: "Archive, compress, unpack, and uncompress files using tar, gzip, and bzip2"
+    chapters: [3]
+  - id: tools.editor.vim
+    text: "Create and edit text files"
+    chapters: [4]
+  - id: files.manage.copy-move
+    text: "Create, delete, copy, and move files and directories"
+    chapters: [3]
+  - id: files.links.create
+    text: "Create hard and soft links"
+    chapters: [3]
+  - id: files.permissions.ugo-rwx
+    text: "List, set, and change standard ugo/rwx permissions"
+    chapters: [7]
+  - id: tools.man.documentation
+    text: "Locate, read, and use system documentation including man, info, and files in /usr/share/doc"
+    chapters: [2]
+
+  # --- Manage software ---
+  # NEW SECTION in RHEL 10. Absent from the RHCSA 10 Cert Guide's Table 1; taken
+  # from the book's Chapter 9 opener and confirmed by Red Hat's published page,
+  # which lists them under a "Manage software" heading of their own.
+  - id: pkg.dnf.repositories
+    text: "Configure access to RPM repositories"
+    chapters: [9]
+  - id: pkg.rpm.install-remove
+    text: "Install and remove RPM software packages"
+    chapters: [9]
+  - id: pkg.flatpak.repositories
+    text: "Configure access to Flatpak repositories"
+    chapters: [9]
+  - id: pkg.flatpak.install-remove
+    text: "Install and remove Flatpak software packages"
+    chapters: [9]
+
+  # --- Create simple shell scripts ---
+  - id: tools.script.conditionals
+    text: "Conditionally execute code (use of: if, test, [], etc.)"
+    chapters: [19]
+  # The book's Table 1 lowercases "looping"; Red Hat capitalises it. Red Hat's
+  # wording wins, and the normalized comparison ignores case either way.
+  - id: tools.script.loops
+    text: "Use Looping constructs (for, etc.) to process file, command line input"
+    chapters: [19]
+  - id: tools.script.inputs
+    text: "Process script inputs ($1, $2, etc.)"
+    chapters: [19]
+  - id: tools.script.command-output
+    text: "Processing output of shell commands within a script"
+    chapters: [19]
+
+  # --- Operate running systems ---
+  - id: boot.lifecycle.shutdown
+    text: "Boot, reboot, and shut down a system normally"
+    chapters: [5]
+  - id: boot.targets.manual
+    text: "Boot systems into different targets manually"
+    chapters: [18]
+  - id: boot.rescue.interrupt
+    text: "Interrupt the boot process in order to gain access to a system"
+    chapters: [18]
+  - id: sys.proc.kill
+    text: "Identify CPU/memory intensive processes and kill processes"
+    chapters: [10]
+  - id: sys.proc.scheduling
+    text: "Adjust process scheduling"
+    chapters: [10]
+  - id: sys.tuned.profiles
+    text: "Manage tuning profiles"
+    chapters: [10]
+  - id: sys.logs.journal
+    text: "Locate and interpret system log files and journals"
+    chapters: [13]
+  - id: sys.logs.persistent-journal
+    text: "Preserve system journals"
+    chapters: [13]
+  - id: systemd.services.network
+    text: "Start, stop, and check the status of network services"
+    chapters: [8]
+  - id: net.ssh.transfer
+    text: "Securely transfer files between systems"
+    chapters: [5]
+
+  # --- Configure local storage ---
+  # CHANGED: Red Hat narrows this to GPT only; the RHEL 9 bullet and the RHCSA
+  # 10 book's Table 1 both still say "MBR and GPT disks". New id, because MBR
+  # partitioning is no longer named as testable.
+  - id: storage.partitions.gpt
+    text: "List, create, and delete partitions on GPT disks"
+    chapters: [14]
+  - id: storage.lvm.pv
+    text: "Create and remove physical volumes"
+    chapters: [15]
+  - id: storage.lvm.vg
+    text: "Assign physical volumes to volume groups"
+    chapters: [15]
+  - id: storage.lvm.lv
+    text: "Create and delete logical volumes"
+    chapters: [15]
+  - id: storage.fstab.uuid-label
+    text: "Configure systems to mount file systems at boot by universally unique ID (UUID) or label"
+    chapters: [14]
+  # Red Hat writes "non-destructively", the book "nondestructively".
+  # Orthographic only, so the id is reused.
+  - id: storage.swap.nondestructive
+    text: "Add new partitions and logical volumes, and swap to a system non-destructively"
+    chapters: [14]
+
+  # --- Create and configure file systems ---
+  # Red Hat capitalises VFAT and XFS; the book lowercases them. Same objective.
+  - id: storage.filesystems.create-mount
+    text: "Create, mount, unmount, and use VFAT, ext4, and XFS file systems"
+    chapters: [14]
+  - id: storage.nfs.mount
+    text: "Mount and unmount network file systems using NFS"
+    chapters: [24]
+  - id: storage.autofs.configure
+    text: "Configure autofs"
+    chapters: [24]
+  - id: storage.lvm.resize
+    text: "Extend existing logical volumes"
+    chapters: [15]
+  # DROPPED here: RHEL 9's "Create and configure set-GID directories for
+  # collaboration" (files.permissions.set-gid) has no RHEL 10 counterpart.
+  - id: files.permissions.troubleshoot
+    text: "Diagnose and correct file permission problems"
+    chapters: [7]
+
+  # --- Deploy, configure, and maintain systems ---
+  # CHANGED: systemd timer units are now named alongside at and cron. New id -
+  # this is a genuine widening of what the objective covers.
+  - id: sys.cron.schedule-systemd-timers
+    text: "Schedule tasks using at, cron and systemd timer units"
+    chapters: [12]
+  - id: systemd.services.enable
+    text: "Start and stop services and configure services to start automatically at boot"
+    chapters: [11]
+  - id: boot.targets.default
+    text: "Configure systems to boot into a specific target automatically"
+    chapters: [17]
+  - id: sys.time.chrony
+    text: "Configure time service clients"
+    chapters: [25]
+  # CHANGED: "Red Hat Network" -> "Red Hat Content Delivery Network". A rename
+  # of the same service, so arguably cosmetic, but the normalized comparison
+  # cannot tell it from a substantive change, and an id that silently spans both
+  # names would be unverifiable. New id.
+  - id: pkg.dnf.install-cdn
+    text: "Install and update software packages from Red Hat Content Delivery Network, a remote repository, or from the local file system"
+    chapters: [9]
+  - id: boot.grub.modify
+    text: "Modify the system bootloader"
+    chapters: [17]
+
+  # --- Manage basic networking ---
+  - id: net.addressing.ipv4-ipv6
+    text: "Configure IPv4 and IPv6 addresses"
+    chapters: [8]
+  - id: net.hostname.resolution
+    text: "Configure hostname resolution"
+    chapters: [8]
+  - id: net.services.autostart
+    text: "Configure network services to start automatically at boot"
+    chapters: [8]
+  # CHANGED: RHEL 9's "firewall-cmd/firewall" becomes "firewalld and
+  # firewall-cmd". New id.
+  - id: net.firewall.restrict-access-firewalld
+    text: "Restrict network access using firewalld and firewall-cmd"
+    chapters: [23]
+
+  # --- Manage users and groups ---
+  - id: users.accounts.manage
+    text: "Create, delete, and modify local user accounts"
+    chapters: [6]
+  - id: users.passwords.aging
+    text: "Change passwords and adjust password aging for local user accounts"
+    chapters: [6]
+  - id: users.groups.manage
+    text: "Create, delete, and modify local groups and group memberships"
+    chapters: [6]
+  # CHANGED: "Configure superuser access" -> "Configure privileged access". New
+  # id; the RHCSA 10 book's Table 1 agrees with Red Hat here, though the book's
+  # Chapter 6 opener still carries the RHEL 9 wording.
+  - id: users.sudo.privileged
+    text: "Configure privileged access"
+    chapters: [6]
+
+  # --- Manage security ---
+  - id: net.firewall.settings
+    text: "Configure firewall settings using firewall-cmd/firewalld"
+    chapters: [23]
+  # RHEL 9's Table 1 left this row's chapter blank; the RHCSA 10 Table 1 fills
+  # it in as chapter 7.
+  - id: files.permissions.umask
+    text: "Manage default file permissions"
+    chapters: [7]
+  - id: net.ssh.key-auth
+    text: "Configure key-based authentication for SSH"
+    chapters: [20]
+  - id: selinux.modes.enforcing-permissive
+    text: "Set enforcing and permissive modes for SELinux"
+    chapters: [22]
+  - id: selinux.contexts.identify
+    text: "List and identify SELinux file and process context"
+    chapters: [22]
+  - id: selinux.contexts.restore
+    text: "Restore default file contexts"
+    chapters: [22]
+  # RHEL 9's Table 1 left this row's chapter blank too; the RHCSA 10 Table 1
+  # fills it in as chapter 22.
+  - id: selinux.ports.labels
+    text: "Manage SELinux port labels"
+    chapters: [22]
+  - id: selinux.booleans.modify
+    text: "Use Boolean settings to modify system SELinux settings"
+    chapters: [22]
+  # DROPPED here: RHEL 9's "Diagnose and address routine SELinux policy
+  # violations" (selinux.troubleshoot.violations) has no RHEL 10 counterpart.
+  # Note the RHCSA 10 book still has a "Diagnosing and Addressing SELinux Policy
+  # Violations" section in chapter 22 - the topic survives, the objective does not.
+
+  # --- Manage containers ---
+  # DROPPED ENTIRELY. All eight RHEL 9 containers.* objectives are gone; see the
+  # header of this file. Deliberately no entries here rather than commented-out
+  # ones, so `areas` computed from this file genuinely lacks `containers`.
