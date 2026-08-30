@@ -36,8 +36,15 @@ export interface FixtureResult {
   failures: string[]
 }
 
-const MIN_SOLUTIONS = 2
-const MIN_ANTISOLUTIONS = 1
+/**
+ * Fixture floors. Exported because `src/cli/lint.ts` enforces the same two
+ * numbers without a guest, and two copies of a floor drift apart. `inventoryGate`
+ * below is the runtime half, reached only from `rhcsa validate`, which reverts a
+ * snapshot; the lint is the half that runs on a checkout with no ISO. The
+ * *reason* for the floors lives on `inventoryGate`.
+ */
+export const MIN_SOLUTIONS = 2
+export const MIN_ANTISOLUTIONS = 1
 
 export async function loadTaskScripts(task: TaskSpec, assertLib: string): Promise<TaskScripts> {
   const setup = await readFile(join(task.dir, 'setup.sh'), 'utf8')

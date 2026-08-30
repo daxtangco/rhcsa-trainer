@@ -1,7 +1,10 @@
+import type { Dirent } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
+import { loadBank, type Bank } from '../engine/content/bank.ts'
 import { ContentError } from '../engine/content/errors.ts'
 import { parseExpectations } from '../engine/validate/expectations.ts'
+import { MIN_ANTISOLUTIONS, MIN_SOLUTIONS } from '../engine/validate/harness.ts'
 import { checkpointIds } from '../server/session.ts'
 
 /**
@@ -248,6 +251,139 @@ function taskDirOf(gradeScript: string): string {
   return gradeScript.slice(0, gradeScript.length - '/grade.sh'.length)
 }
 
+/**
+ * One fixture directory, with "absent" and "unreadable" kept apart from "empty".
+ *
+ * `loadTaskScripts` reads these with `readdir(dir).catch(() => [])`, so ENOENT, a
+ * permission error and a genuinely empty directory all arrive as zero fixtures.
+ * That is the swallow `docs/r1-findings.md` diagnoses as *"the directory name is
+ * misspelled"* with a human checking the spelling as its remedy. Distinguishing
+ * the three here is what lets the message say which one happened.
+ *
+ * An entry that is not a file is `unexpected` regardless of its name: a directory
+ * called `foo.sh` passes `loadTaskScripts`'s `.endsWith('.sh')` filter and then
+ * fails on `readFile`.
+ */
+type FixtureDir =
+  | { kind: 'absent' }
+  | { kind: 'unreadable'; message: string }
+  | { kind: 'read'; scripts: string[]; unexpected: string[] }
+
+function isEnoent(e: unknown): boolean {
+  if (typeof e !== 'object' || e === null || !('code' in e)) return false
+  const code: unknown = e.code
+  return code === 'ENOENT'
+}
+
+async function scanFixtureDir(dir: string): Promise<FixtureDir> {
+  let entries: Dirent[]
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch (e) {
+    if (isEnoent(e)) return { kind: 'absent' }
+    return { kind: 'unreadable', message: e instanceof Error ? e.message : String(e) }
+  }
+
+  const scripts: string[] = []
+  const unexpected: string[] = []
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith('.sh')) scripts.push(entry.name)
+    else unexpected.push(entry.name)
+  }
+  return { kind: 'read', scripts: scripts.sort(), unexpected: unexpected.sort() }
+}
+
+/**
+ * The fixture floors, ported from the gate that has never run to the gate that
+ * always runs.
+ *
+ * `inventoryGate` in `src/engine/validate/harness.ts` already treats a thin
+ * fixture set as a content defect, so the decision is not re-litigated here — only
+ * its location. That gate lives inside `rhcsa validate`, which reverts a snapshot
+ * and needs a guest; this one needs neither. `MIN_SOLUTIONS` and
+ * `MIN_ANTISOLUTIONS` are imported rather than restated for the same reason
+ * `nonLiteralIds` re-runs `checkpointIds` rather than matching ids itself: two
+ * copies of a rule drift, and the copy nobody runs drifts first.
+ *
+ * **Everything here iterates `bank.tasks`, not a directory walk.** A walk cannot
+ * notice what it did not find, which is the whole defect being closed: with no
+ * expected count, a task whose `antisolutions/` had vanished produced zero
+ * anti-solution records, zero problems and exit 0. The bank is the only thing that
+ * knows a task is supposed to have fixtures at all.
+ */
+async function checkFixtureFloors(
+  bank: Bank,
+  graders: Set<string>,
+  rel: (file: string) => string,
+  problems: string[],
+): Promise<void> {
+  const dirs: Array<{ sub: string; floor: number; label: string }> = [
+    { sub: 'solutions', floor: MIN_SOLUTIONS, label: 'solutions' },
+    { sub: 'antisolutions', floor: MIN_ANTISOLUTIONS, label: 'anti-solution' },
+  ]
+
+  for (const task of bank.tasks) {
+    const where = rel(task.dir)
+
+    // Derived from the bank, and deliberately not left to the orphan check below.
+    // A deleted `grade.sh` is reported there only as `no sibling grade.sh` from
+    // each of its now-orphaned anti-solutions — which means the grader half is
+    // guarded by the fixture half's files being present, and the fixture half was
+    // until now guarded by nothing. Delete both and neither complained.
+    if (!graders.has(join(task.dir, 'grade.sh'))) {
+      problems.push(
+        `${where}: ${task.id} is in the bank but has no grade.sh, so nothing about this task was checked`,
+      )
+    }
+
+    for (const { sub, floor, label } of dirs) {
+      const scan = await scanFixtureDir(join(task.dir, sub))
+
+      if (scan.kind === 'unreadable') {
+        problems.push(`${where}: ${sub}/ could not be read (${scan.message}), so its fixtures were not counted`)
+        continue
+      }
+      if (scan.kind === 'absent') {
+        // Absent covers the misspelling: `antisolutons/` means the directory the
+        // loader looks for is gone. Reported instead of the count below rather
+        // than as well as it, because "the directory is missing" and "it holds
+        // too few files" are one fact here, and two lines for one fact is how a
+        // problem list stops being read.
+        problems.push(
+          `${where}: ${sub}/ is missing. loadTaskScripts swallows the readdir failure, so an absent or ` +
+            `misspelled directory name loads zero fixtures and reads exactly like a task with nothing to check.`,
+        )
+        continue
+      }
+      if (scan.scripts.length < floor) {
+        problems.push(`${where}: needs at least ${floor} ${label}, found ${scan.scripts.length}`)
+      }
+      for (const name of scan.unexpected) {
+        problems.push(
+          `${where}: ${sub}/${name} does not end in .sh, so no fixture loads it. Renaming a fixture off .sh ` +
+            `drops it from every run without changing a single declared expectation.`,
+        )
+      }
+    }
+  }
+
+  // The other direction. `bank.tasks` is itself assembled from a walk for
+  // `task.yaml`, so iterating it would close the missing-expectation hole one way
+  // only: remove a `task.yaml` and the task leaves the list that drives every rule
+  // above, while its `grade.sh` still gets its headers checked and its fixtures
+  // get counted by nobody. Reconciling both ways is what stops either half of this
+  // command from resting on the other half's files being present.
+  const taskDirs = new Set(bank.tasks.map((t) => t.dir))
+  for (const grader of graders) {
+    if (!taskDirs.has(taskDirOf(grader))) {
+      problems.push(
+        `${rel(grader)}: no task in the bank owns this grader, so its fixture floors were not checked ` +
+          `(a missing or unloadable task.yaml does this)`,
+      )
+    }
+  }
+}
+
 export interface LintOptions {
   /**
    * Accept a content root containing no `grade.sh`. Off by default; see the
@@ -294,6 +430,29 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
       `${root}: no grade.sh found, so nothing was checked. That is not the same as "all clear" — ` +
         `check the content root, or pass --allow-empty if an empty bank is genuinely expected.`,
     )
+  }
+
+  // The floors are per-task, so a root the walk found no graders in has no task to
+  // iterate — and that case already has its own single, actionable message above.
+  // Loading the bank there would bury it under YAML-shaped noise about a directory
+  // the operator most likely mistyped.
+  if (graders.length > 0) {
+    let bank: Bank | undefined
+    try {
+      bank = await loadBank(root)
+    } catch (e) {
+      // "The floors could not be checked" is itself a problem. Reporting it as a
+      // note, or not at all, would reintroduce the defect this round closes one
+      // level up: the gate exiting 0 having skipped the check.
+      //
+      // The header checks below still run, which is the point of the split
+      // documented on `taskDirOf`: a YAML error must not take the script lint with
+      // it. Only the derived rules are skipped, and skipping them is loud.
+      const detail =
+        e instanceof ContentError ? e.problems.join('; ') : e instanceof Error ? e.message : String(e)
+      problems.push(`${root}: the bank did not load, so the per-task fixture floors were not checked — ${detail}`)
+    }
+    if (bank !== undefined) await checkFixtureFloors(bank, new Set(graders), rel, problems)
   }
 
   for (const grader of graders) {

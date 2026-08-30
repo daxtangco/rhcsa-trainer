@@ -1,9 +1,10 @@
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { run } from '../../src/cli/index.ts'
+import { MIN_ANTISOLUTIONS, MIN_SOLUTIONS } from '../../src/engine/validate/harness.ts'
 import { checkpointIds } from '../../src/server/session.ts'
 
 // A checker nobody has seen fail is a checker nobody has tested. `rhcsa lint` is
@@ -278,6 +279,169 @@ describe('rhcsa lint fails when there is nothing to check', () => {
     const code = await run(['lint', '--content', root, '--allow-empty'], c.io)
     expect(code).toBe(1)
     expect(c.err.join('\n')).toMatch(/LV_Size/)
+  })
+})
+
+describe('rhcsa lint enforces the fixture floors it derives from the bank', () => {
+  // The floors themselves are not new: `inventoryGate` in
+  // src/engine/validate/harness.ts has held them since Task 18. What is new is
+  // where they run. That gate is inside `rhcsa validate`, which reverts a snapshot
+  // and needs a guest, and has never run against one in this project's history;
+  // this command is the content gate that needs no VM. So a thin or vanished
+  // fixture set was a content defect the project had already named and had no
+  // executing check for.
+  //
+  // Every plant below is the same shape as F1's: the walk found fewer files, so
+  // there was less to compare, so everything compared successfully. The fix is
+  // that the expectation now comes from `bank.tasks` — the only thing that knows a
+  // task is supposed to have fixtures at all — and not from the walk.
+
+  const STORAGE = 'tasks/storage/014-grow-home-lv' // 2 solutions, 3 anti-solutions
+  const USERS = 'tasks/users/006-team-provisioning' // 3 solutions, 2 anti-solutions
+
+  it('passes the shipped bank, so these rules are a floor under today\'s content', async () => {
+    // Stated as its own test rather than left implicit in the exit-0 test above:
+    // a floor that fires on committed content is a change to the content, and
+    // this is not one. Five tasks, anti-solution counts 5/3/3/3/2, no non-.sh
+    // file anywhere under a fixture directory.
+    const r = await lint(CONTENT)
+    expect(r.err).toBe('')
+    expect(r.code).toBe(0)
+  })
+
+  it('catches a missing antisolutions/ directory, which a walk cannot notice', async () => {
+    // The original third silent-green channel, measured at exit 0 before this
+    // rule existed: 18 inventory rows instead of 21, every header that remained
+    // agreeing with itself, no problems.
+    const root = await bankCopy()
+    await rm(join(root, STORAGE, 'antisolutions'), { recursive: true })
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/014-grow-home-lv: antisolutions\/ is missing/)
+  })
+
+  it('catches antisolutions/ misspelled as antisolutons/, which is the documented failure mode', async () => {
+    // docs/r1-findings.md diagnoses this one as "the directory name is
+    // misspelled; readdir failures are swallowed", and prescribes a human
+    // checking the spelling by hand. The files are all still there and all still
+    // valid; nothing loads them.
+    const root = await bankCopy()
+    await rename(join(root, STORAGE, 'antisolutions'), join(root, STORAGE, 'antisolutons'))
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/014-grow-home-lv: antisolutions\/ is missing/)
+  })
+
+  it('catches an anti-solution count below MIN_ANTISOLUTIONS, with the directory still present', async () => {
+    // Distinct from the case above: the directory exists and is readable, so the
+    // swallow is not involved. This is the floor doing the work.
+    const root = await bankCopy()
+    const dir = join(root, USERS, 'antisolutions')
+    await rm(join(dir, '01-no-group-no-sudo.sh'))
+    await rm(join(dir, '02-aging-skipped.sh'))
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(
+      new RegExp(`006-team-provisioning: needs at least ${MIN_ANTISOLUTIONS} anti-solution, found 0`),
+    )
+    // The wording is harness.ts's, and the numbers are imported from it rather
+    // than restated. Two copies of a floor drift, and the copy nobody runs drifts
+    // first.
+    expect(MIN_ANTISOLUTIONS).toBe(1)
+  })
+
+  it('catches a solution count below MIN_SOLUTIONS', async () => {
+    // Anti-solutions catch a grader that passes work that should fail; multiple
+    // independent solutions catch a grader over-fitted to one author's habits.
+    // Both floors exist for stated reasons and both now run without a guest.
+    const root = await bankCopy()
+    await rm(join(root, STORAGE, 'solutions', '02-lvextend-r-by-uuid.sh'))
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(new RegExp(`014-grow-home-lv: needs at least ${MIN_SOLUTIONS} solutions, found 1`))
+    expect(MIN_SOLUTIONS).toBe(2)
+  })
+
+  it('catches a fixture renamed off .sh, which no count notices', async () => {
+    // The nastiest of the four, because it survives the floor. 014 has three
+    // anti-solutions; renaming one leaves two, which clears MIN_ANTISOLUTIONS, so
+    // the fixture is silently gone from every run and no count is out of range.
+    // The assertion below therefore also proves the floor did *not* fire — if it
+    // had, this test would pass whether the unexpected-file rule existed or not.
+    const root = await bankCopy()
+    const dir = join(root, STORAGE, 'antisolutions')
+    await rename(join(dir, '03-wrong-lv.sh'), join(dir, '03-wrong-lv.sh.bak'))
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/antisolutions\/03-wrong-lv\.sh\.bak does not end in \.sh/)
+    expect(r.err).not.toMatch(/needs at least/)
+  })
+
+  it('catches a solution renamed off .sh even where the floor still clears', async () => {
+    // The same rule on the sibling directory, which the brief's four did not
+    // name. Measured: 006 is the one task with three solutions, so renaming one
+    // leaves exactly MIN_SOLUTIONS and the floor stays quiet — the asymmetry was
+    // a live hole rather than a tidiness point. Four of the five tasks ship
+    // exactly two solutions, where the floor would have caught it.
+    const root = await bankCopy()
+    const dir = join(root, USERS, 'solutions')
+    await rename(join(dir, '03-primary-group-only.sh'), join(dir, '03-primary-group-only.sh.disabled'))
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/solutions\/03-primary-group-only\.sh\.disabled does not end in \.sh/)
+    expect(r.err).not.toMatch(/needs at least/)
+  })
+
+  it('reports a missing grade.sh from the bank, not only from its orphaned anti-solutions', async () => {
+    // The interlock this replaces ran one direction only. A deleted grade.sh was
+    // caught because its anti-solutions became orphans and said `no sibling
+    // grade.sh`; delete the anti-solutions too and there was no orphan left to
+    // complain. Both halves gone, and both halves silent. The `not.toMatch`
+    // is the load-bearing half of this test: it proves the problem below came
+    // from the bank and not from the old interlock.
+    const root = await bankCopy()
+    await rm(join(root, STORAGE, 'grade.sh'))
+    await rm(join(root, STORAGE, 'antisolutions'), { recursive: true })
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/014-grow-home-lv is in the bank but has no grade\.sh/)
+    expect(r.err).not.toMatch(/no sibling grade\.sh/)
+  })
+
+  it('reports a grader no bank task owns, so neither half rests on the other', async () => {
+    // `bank.tasks` is itself assembled from a walk for task.yaml, so iterating it
+    // closes the missing-expectation hole one way only. Remove a task.yaml and
+    // the task leaves the list that drives every rule above, while its grade.sh
+    // still gets its headers checked and its fixtures get counted by nobody.
+    const root = await bankCopy()
+    await rm(join(root, STORAGE, 'task.yaml'))
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/no task in the bank owns this grader/)
+    expect(r.out).toMatch(/graders checked: 5/)
+  })
+
+  it('says so loudly when the bank will not load, and still lints the headers', async () => {
+    // "The floors could not be checked" is a problem, not a note and not
+    // silence — the same rule as F1 one level up. The header checks keep running
+    // regardless, which is the split documented on `taskDirOf`: a YAML error must
+    // not take the script lint down with it.
+    const root = await bankCopy()
+    await writeFile(join(root, 'objectives.yaml'), 'this: [is not\n  valid: yaml\n', 'utf8')
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/the bank did not load, so the per-task fixture floors were not checked/)
+    expect(r.out).toMatch(/graders checked: 5/)
+    expect(r.out).toMatch(/scripts with headers: 21/)
   })
 })
 
