@@ -337,6 +337,50 @@ describe('grade', () => {
     expect(r.regressions.map((cp) => cp.id)).toEqual(['a'])
     expect(r.regressions[0]?.status).toBe('skip')
   })
+
+  // --- F13: the one real-transport failure mode that is not an exit code. ---
+  // `LabTransport.exec` is documented as never throwing on non-zero exit, but
+  // both real transports still reject for infrastructure reasons unrelated to
+  // exit status (no guest IP, a staging failure). Before this, no
+  // `FakeTransport` handler in the suite ever rejected, so this path had no
+  // test anywhere.
+
+  it('rejects out of grade() when the first exec rejects, rather than swallowing it into a verdict', async () => {
+    // grade() wraps only reboot() in a try/catch (see the module comment on
+    // GradeOptions); the exec calls are unguarded on purpose, so a rejection
+    // here must propagate with the transport's own message.
+    const t = new FakeTransport(() => {
+      throw new Error('no guest IP could be determined')
+    })
+
+    await expect(
+      grade({ task: task(), transport: t, gradeScript: 'grade', reboot: async () => {} }),
+    ).rejects.toThrow(/no guest IP could be determined/)
+  })
+
+  it('discards verdict A entirely when the second exec rejects after a successful reboot', async () => {
+    // A real, deliberate residual (whole-branch review, target 3(d)): when the
+    // reboot itself succeeds but the post-reboot exec rejects, verdict A ("it
+    // works now") is thrown away because verdict B ("survives a reboot") never
+    // arrived — grade() has no fallback here. This test documents that
+    // behaviour; it is not a fix and none is wanted for it in this dispatch.
+    let rebooted = false
+    const t = new FakeTransport(() => {
+      if (!rebooted) return { stdout: PASS_PASS, stderr: '', code: 0 }
+      throw new Error('connection reset by peer')
+    })
+
+    await expect(
+      grade({
+        task: task(),
+        transport: t,
+        gradeScript: 'grade',
+        reboot: async () => {
+          rebooted = true
+        },
+      }),
+    ).rejects.toThrow(/connection reset by peer/)
+  })
 })
 
 describe('finalVerdict', () => {

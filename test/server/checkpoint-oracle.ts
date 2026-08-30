@@ -529,8 +529,11 @@ export const ORACLE_CASES: OracleCase[] = [
   // `"…"` that spanned lines paired its quotes *positionally* — exactly the defect
   // whose fix `closingQuote`'s own docstring describes, arriving through the
   // newline instead of within a line. The direction is the bad one: the walk stays
-  // **inside** the string, so `expectedTotal` collapses toward 0, `incomplete`
-  // goes false, and a grader that died on its first command reports the lab passed.
+  // **inside** the string, so `expectedTotal` collapses toward 0 — and once it
+  // does, `incomplete` cannot fire for any nonzero arrival count. A grader that
+  // dies before its first `ck` is still caught (`allPassed`'s `length > 0` guard),
+  // but one that died on its **second** command, having passed the first, reports
+  // the lab passed with nothing after it checked.
   // Not one of the 349 tests told the defect from the fix, in either direction,
   // and the six pinned counts were byte-identical both ways. Hence these rows.
   {
@@ -726,6 +729,12 @@ export const ORACLE_DIVERGENCES: OracleDivergence[] = [
       '`ck_fail` and `printf` argument lists.',
   },
   {
+    // Named for `$[ … ]`, but do not read this as a deprecated-syntax curiosity:
+    // the `arith` guard's blind spot is "arithmetic contexts `arith` does not
+    // enter" generally, and `$[ … ]` is only the oldest one. Array subscripts
+    // (`${a[i << 1]}`), subscripted assignment targets (`a[1 << 1]=x`) and
+    // substring offsets (`${s: 1 << 1}`) are all ordinary, current bash that
+    // fails the same way — measured, each: bash 1 (`real-id`), counter 0.
     name: 'deprecated-arith-read-as-heredoc',
     script: sh('echo $[1 << 2]', 'ck real-id "d" 0'),
     direction: 'under',
@@ -740,25 +749,66 @@ export const ORACLE_DIVERGENCES: OracleDivergence[] = [
       'argument for widening the delimiter parser** — that widening could only move ' +
       'shapes in the fail-closed direction. It moved this one open, and silently. ' +
       'Not closed here because the exception granted for this round covers two ' +
-      'named regressions only; `$[ ]` has been deprecated since bash 2 and measured ' +
-      'absent from `content/`, so the reachability is the lowest in this list.',
+      'named regressions only. **This is not a deprecated-syntax curiosity**: ' +
+      '`$[ … ]` is the oldest member of a live class, "arithmetic context `arith` ' +
+      'does not enter", and array subscripts, subscripted assignment targets and ' +
+      'substring offsets are ordinary current bash in the same class, measured to ' +
+      'fail identically (bash 1, counter 0 in each). Pinning those needs their own ' +
+      'entries; this one is left named for its own shape and measured absent from ' +
+      '`content/`, so the reachability is the lowest in this list.',
   },
   {
+    // Pins the `subst` half of this seam only. The `arith` half is the sibling
+    // entry below, and its direction is the opposite one — do not read this
+    // entry's "fail-closed" as a claim about the whole seam.
     name: 'subst-depth-resets-across-newline',
     script: sh(`x=$(echo 'a`, `b'; ck phantom "d" 0)`, 'ck real-id "d" 0'),
     direction: 'over',
     bashIds: ['real-id'],
     counterIds: ['phantom', 'real-id'],
     why:
-      'The `$( )` and `(( ))` nesting depths are locals of `scanLine` and reset on ' +
-      'every line, while the open quote now survives the newline: two pieces of ' +
-      'lexical state with different lifetimes. So a substitution that spans lines ' +
-      'loses its depth, and a `ck` on the closing line is declared even though its ' +
-      'JSONL goes into the captured output and the harness never sees it. ' +
-      'Fail-closed. Closing it means giving `subst` and `arith` the same lifetime ' +
-      'as `quoted`, which is the right shape and is exactly the kind of ' +
-      'multi-line state change this round is not permitted to make. Measured absent ' +
-      'from the bank: no multi-line `$( )` in the counted text.',
+      'The `$( )` nesting depth is a local of `scanLine` and resets on every line, ' +
+      'while the open quote now survives the newline: two pieces of lexical state ' +
+      'with different lifetimes. So a substitution that spans lines loses its ' +
+      'depth, and a `ck` on the closing line is declared even though its JSONL ' +
+      'goes into the captured output and the harness never sees it. Fail-closed — ' +
+      'for *this* mechanism. `(( ))` shares the same reset and is pinned ' +
+      'separately as `arith-depth-resets-across-newline`, because it fails in the ' +
+      'opposite direction: silent, not loud. Closing either means giving `subst` ' +
+      'and `arith` the same lifetime as `quoted`, which is the right shape and is ' +
+      'exactly the kind of multi-line state change this round is not permitted to ' +
+      'make. Measured absent from the bank: no multi-line `$( )` in the counted ' +
+      'text.',
+  },
+  {
+    // The sibling of the entry above, and the reason it is wrong to read that one
+    // as pinning "the cost" of `arith`/`subst` resetting across the newline: this
+    // shape resets `arith` instead of `subst`, and it fails **open**, not closed.
+    // A round-6 disclosure and this file's own docstring on `scanLine` both said
+    // this seam was covered by the entry above; it was not, and the unpinned
+    // third was the dangerous direction. See P25/P20 in
+    // `whole-branch-parked.md`.
+    name: 'arith-depth-resets-across-newline',
+    script: sh('x=$((', '1 << 2 ))', 'ck real-id "d" 0'),
+    direction: 'under',
+    bashIds: ['real-id'],
+    counterIds: [],
+    why:
+      '`arith` is a `scanLine` local and resets on every line, same as `subst`, ' +
+      "but the sibling shape above can't stand in for this one: there the reset " +
+      'gains a phantom id while keeping the real one (fail-closed, loud). Here, ' +
+      'with the arithmetic context reset, line 2\'s `<<` is read as a heredoc ' +
+      "opener with delimiter `2` — `1 << 2 ))` has no arithmetic context left to " +
+      'keep it a shift operator — and the body never finds its terminator, so ' +
+      'every remaining line of the grader, including the real checkpoint, is ' +
+      'discarded. Silent fail-open. The one-line form (`x=$(( 1 << 2 ))`) agrees ' +
+      'with bash, so this is purely a cost of the newline, not of `((` itself. ' +
+      'Not reachable in the bank today, but `$(( ))` / `(( ))` appear six times ' +
+      'in the counted text including `content/lib/assert.sh`, which is prepended ' +
+      'to every grader — the closest shape on this list to reachable, and one ' +
+      'authoring choice away (a `$((` left open at end of line). Closing it means ' +
+      'the same multi-line state change as the sibling entry, which this round ' +
+      'does not make.',
   },
   {
     name: 'brace-list-containing-ck',
@@ -788,6 +838,32 @@ export const ORACLE_DIVERGENCES: OracleDivergence[] = [
       'the fail-closed direction, it needs the walk to model what `sed` does with ' +
       'its own argument, and the sketcher-side version of this is already parked. ' +
       'Measured absent from the bank; the six pinned counts are unmoved.',
+  },
+  {
+    // A third `closingQuote` call site (`heredocDelimiter`, session.ts:200) that
+    // computes `escapes` a third way, distinct from the two the main loop and the
+    // carried-run prologue agree on: `ch === '"'` alone, with no ANSI-C case at
+    // all. Not caught by the pinned six because none of them opens a heredoc with
+    // a `$'…'` delimiter.
+    name: 'heredoc-delimiter-ansi-c-quoted',
+    script: sh(`cat <<$'EOF'`, 'ck phantom "d" 0', 'EOF', 'ck real-id "d" 0'),
+    direction: 'under',
+    bashIds: ['real-id'],
+    counterIds: [],
+    why:
+      "bash ANSI-C-dequotes a heredoc delimiter, so `$'EOF'` names the same word " +
+      "`'EOF'` does: `EOF`. `heredocDelimiter` does not recognise `$'…'` as a form " +
+      "at all — it has no `dollar` tracking the way `scanLine`'s main loop does — " +
+      "so the `$` is read as an ordinary character and folded into the delimiter, " +
+      'landing on `$EOF` instead of `EOF`. The real terminator on the line below ' +
+      'never matches that, so the heredoc body never closes and every remaining ' +
+      'line of the grader — including the real checkpoint — is discarded. Silent ' +
+      'fail-open, and structural: this is the third site computing one predicate ' +
+      'three different ways in the function P18 exists to replace by construction. ' +
+      'Not fixed here — the fix is `heredocDelimiter` sharing `scanLine`\'s ' +
+      '`dollar` tracking (or the walk P18 unifies them into), which is a change to ' +
+      'the lexer this round does not make. Measured absent from the bank: no ' +
+      'grader opens a heredoc with an ANSI-C-quoted delimiter.',
   },
 ]
 

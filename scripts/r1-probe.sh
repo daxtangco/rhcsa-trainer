@@ -255,8 +255,13 @@ case "$tcp_outcome" in
     say "pass its .vmx explicitly."
     exit 1
     ;;
-  *)
-    say "R1 CONFIRMED AS A PROBLEM. Try these, in order of preference:"
+  dropped)
+    say "R1 CONFIRMED AS A PROBLEM: TCP/22 timed out with no error at all, and"
+    say "ping showed plain loss with no ICMP error either - something between"
+    say "WSL2 and $ip is silently swallowing the packets. Distinct from"
+    say "'refused' (the guest is up and nothing is listening) and from"
+    say "'unreachable' (nothing claims the address at all): this is the"
+    say "firewall signature. Try these, in order of preference:"
     say ""
     say "0. Re-run this probe once more before changing anything. Confirming the"
     say "   same result twice costs nothing and rules out a one-off blip before"
@@ -281,6 +286,19 @@ case "$tcp_outcome" in
     say "5. Do nothing. VmrunTransport uses runProgramInGuest and needs no network"
     say "   at all. Grading works; the interactive terminal is the part that"
     say "   suffers. This is a supported configuration, not a failure."
+    exit 1
+    ;;
+  unknown|"")
+    say "R1 INCONCLUSIVE: this probe did not determine an outcome for TCP/22"
+    say "(tcp_outcome='$tcp_outcome') - that is not the same as R1 being"
+    say "confirmed against your network. Re-run and read the TCP/22 section"
+    say "above for what actually happened."
+    exit 1
+    ;;
+  *)
+    say "BUG: r1-probe.sh reached tcp_outcome='$tcp_outcome', which no case arm"
+    say "above names. This is a bug in the probe, not a verdict about your"
+    say "network - please report it with the full output above."
     exit 1
     ;;
 esac

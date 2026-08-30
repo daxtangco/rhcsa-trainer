@@ -64,6 +64,37 @@ describe('checkCoverage', () => {
     )
   })
 
+  it('treats a typo\'d objective id on a concept card as a hard problem', async () => {
+    // Objective ids are permanent scheduling keys, so a typo'd reference on a
+    // card is silent content rot in exactly the way a typo'd reference on a
+    // task is — but the concept loop used to read only `prerequisites`, so a
+    // card's own `objectives:` list was validated nowhere. `lint:content` and
+    // `coverage` both passed and the suite stayed green.
+    const bank = await loadBank(BANK)
+    const concept = bank.conceptsById.get('storage.lvm-abstraction-stack')
+    if (!concept) throw new Error('fixture missing')
+    concept.objectives = ['storage.typo']
+
+    const report = checkCoverage(bank)
+    expect(report.problems.join('\n')).toMatch(
+      /storage\.lvm-abstraction-stack maps to unknown objective: storage\.typo/,
+    )
+  })
+
+  it('does not let a concept card claim objective coverage on its own', async () => {
+    // A card's objectives: list is validated above, but it must not feed
+    // coveredObjectives — coverage is a property of exam-objective tasks
+    // (spec 6.4). Pointing a card at the one objective no task covers must not
+    // make it disappear from uncoveredObjectives.
+    const bank = await loadBank(BANK)
+    const concept = bank.conceptsById.get('storage.lvm-abstraction-stack')
+    if (!concept) throw new Error('fixture missing')
+    concept.objectives = ['autofs.maps.configure']
+
+    const report = checkCoverage(bank)
+    expect(report.uncoveredObjectives).toEqual(['autofs.maps.configure'])
+  })
+
   it('treats an unresolvable concept prerequisite as a hard problem', async () => {
     const bank = await loadBank(BANK)
     const concept = bank.conceptsById.get('storage.lvm-abstraction-stack')

@@ -190,6 +190,15 @@ export function checkCoverage(bank: Bank): CoverageReport {
   }
 
   for (const concept of bank.concepts) {
+    for (const oid of concept.objectives) {
+      // Unlike a task's `objectives:` above, a card's must **not** feed
+      // `coveredObjectives` — coverage is a property of exam-objective tasks
+      // (spec 6.4), a card only teaches toward one. So this validates the
+      // reference and stops; it never adds to the coverage set.
+      if (!bank.objectives.byId.has(oid)) {
+        problems.push(`${concept.id} maps to unknown objective: ${oid}`)
+      }
+    }
     for (const pid of concept.prerequisites) {
       if (!bank.conceptsById.has(pid)) {
         problems.push(`${concept.id} lists unknown prerequisite: ${pid}`)

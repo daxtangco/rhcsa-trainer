@@ -179,6 +179,16 @@ interface OpenQuote {
  * Quoting decides expansion inside the body, which this counter does not model,
  * so it is only removed here and not recorded. What matters is the delimiter the
  * terminator has to equal, which is the word after quote removal.
+ *
+ * **Residual, pinned rather than fixed:** the `'`/`"` branch below computes its
+ * own `escapes` argument to `closingQuote` as `ch === '"'`, with no ANSI-C case —
+ * unlike the two call sites in `scanLine`, which both track `dollar` to detect a
+ * `$'…'` run. So `cat <<$'EOF'` folds the `$` into the delimiter instead of
+ * dequoting it, and the real `EOF` terminator on a later line never matches. See
+ * `heredoc-delimiter-ansi-c-quoted` in `ORACLE_DIVERGENCES` for the measured
+ * shape; not fixed here because the honest fix is giving this function the same
+ * `dollar` tracking `scanLine` has, which is lexer surgery this round is not
+ * making.
  */
 function heredocDelimiter(slice: string): PendingHeredoc | undefined {
   let i = 2
@@ -266,9 +276,13 @@ function heredocDelimiter(slice: string): PendingHeredoc | undefined {
  * Rule 6 also left a seam worth naming, because it is the one place this walk is
  * now inconsistent with itself: `quoted` crosses the newline while `subst` and
  * `arith` are `scanLine` locals that reset on every line, so the pieces of lexical
- * state have different lifetimes. `subst-depth-resets-across-newline` pins what
- * that costs. Nothing in either list is reachable in the bank today, which is a
- * statement about five graders rather than a guarantee about the next one.
+ * state have different lifetimes. `subst-depth-resets-across-newline` and
+ * `arith-depth-resets-across-newline` each pin one half of what that costs, and
+ * the two halves fail in opposite directions — `subst`'s reset gains a phantom id
+ * (loud), `arith`'s loses the real one (silent). One entry was mistaken for both
+ * for two rounds; see P25 in `whole-branch-parked.md`. Nothing in either list is
+ * reachable in the bank today, which is a statement about five graders rather
+ * than a guarantee about the next one.
  */
 function scanLine(
   line: string,

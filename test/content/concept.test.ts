@@ -39,7 +39,13 @@ describe('loadConcept', () => {
     expect(p).toMatch(/objectives must be a list of strings/)
   })
 
-  it('rejects an omitted objectives key, because a card with no objectives is unreachable from the disclosure ladder', async () => {
+  it('rejects an omitted objectives key: every concept card must declare at least one objective id', async () => {
+    // Not a disclosure-ladder claim — `concept.objectives` has no consumer
+    // anywhere in `src/`. Card reachability runs through
+    // `task.requiresConcepts`, not this field. This asserts the parser-level
+    // rule instead: a card with no declared objective teaches toward nothing
+    // `checkCoverage` can validate, so `parseConcept` requires the list to be
+    // non-empty at authoring time.
     const err = (await loadConcept(`${FIXTURES}missing-objectives.md`).catch(
       (e: unknown) => e,
     )) as ContentError

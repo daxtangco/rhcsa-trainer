@@ -255,6 +255,31 @@ describe('rhcsa lint fails on planted defects', () => {
     expect(r.out).toMatch(/^ {2}expect-fail: fs-home-size@both$/m)
   })
 
+  it('does not flag a set-options line joined to a real command by a semicolon', async () => {
+    // SHELL_OPTION_LINE used to be start-anchored only, so `.test()` matched on
+    // the `set -` prefix alone and `changesNothing` discarded the whole line —
+    // including a real command joined on with `;` — as a no-op. That reported an
+    // anti-solution that does real work as one that changes nothing, with this
+    // rule named in the message: the loud direction, telling its author the
+    // opposite of the truth.
+    const root = await bankCopy()
+    const fixture = 'tasks/storage/014-grow-home-lv/antisolutions/01-forgot-growfs.sh'
+    await writeFile(
+      join(root, fixture),
+      [
+        '#!/usr/bin/env bash',
+        '# expect-fail: fs-home-size',
+        'set -euo pipefail; sudo lvextend -L 12G /dev/rhel/home',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const r = await lint(root)
+    expect(r.err).not.toMatch(/nothing here but comments and shell options/)
+    expect(r.code).toBe(0)
+  })
+
   it('reports every problem in one pass rather than stopping at the first file', async () => {
     // Content authoring is a loop; one-error-per-run makes that loop slow. Same
     // reason ContentError aggregates.

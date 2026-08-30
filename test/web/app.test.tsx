@@ -203,7 +203,7 @@ describe('App, guided mode', () => {
 
     // Said in words, including why there is no rating - a finished attempt with
     // no explanation reads as one that failed to record.
-    expect(screen.getByText(/Guided mode records no scheduler rating/)).toBeDefined()
+    expect(screen.getByText(/Guided mode computes no rating/)).toBeDefined()
     // And the controls are shut, in the rail as well as in the box.
     expect(screen.getByRole('button', { name: /grade/i }).getAttribute('disabled')).not.toBeNull()
     expect(screen.getByRole('button', { name: /hint/i }).getAttribute('disabled')).not.toBeNull()
@@ -306,9 +306,40 @@ describe('App, a rated mode', () => {
     key('F4')
     await waitFor(() => expect(screen.getByText('5 / 5 passed')).toBeDefined())
     key('F8')
-    await waitFor(() => expect(screen.getByText(/Scheduler rating/)).toBeDefined())
+    await waitFor(() => expect(screen.getByText(/Rating \(not saved\)/)).toBeDefined())
     expect(screen.getByText('hard')).toBeDefined()
     expect(screen.queryByText(/grade blew up/)).toBeNull()
-    expect(screen.queryByText(/records no scheduler rating/)).toBeNull()
+    expect(screen.queryByText(/Guided mode computes no rating/)).toBeNull()
+  })
+
+  it('says the rating was withheld for an untrustworthy report, not that the mode has none', async () => {
+    // `rating === null` is what a guided finish and an untrustworthy-report
+    // finish both look like off the wire. A copy fix that only handles the
+    // guided case still tells a practice-mode student "guided mode records no
+    // rating" here, which is false by name and false by implication both.
+    resetFake()
+    fake.finish.mockResolvedValueOnce({
+      id: 's1',
+      taskId: TASK_ID,
+      mode: 'practice',
+      rung: 1,
+      maxRung: 5,
+      checkpointTotal: 5,
+      startedAt: 0,
+      endedAt: 1,
+      phase: 'graded',
+      report: { ...REPORT, incomplete: true },
+      rating: null,
+    })
+    await enterLab(/^Practice /)
+
+    key('F4')
+    await waitFor(() => expect(screen.getByText('5 / 5 passed')).toBeDefined())
+    key('F8')
+    await waitFor(() => expect(screen.getByText(/Attempt finished/)).toBeDefined())
+
+    expect(screen.getByText(/checkpoint count could not be trusted/)).toBeDefined()
+    expect(screen.queryByText(/Guided mode computes no rating/)).toBeNull()
+    expect(screen.queryByText(/Rating \(not saved\)/)).toBeNull()
   })
 })

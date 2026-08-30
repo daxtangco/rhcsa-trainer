@@ -256,8 +256,9 @@ export function Rail(props: RailProps) {
       <div className="mt-auto flex flex-col gap-2">
         {finished ? (
           <div className="text-xs text-zinc-500">
-            This attempt is finished and its rating is recorded. Start a new session to attempt it
-            again — grading or reverting now would change what the rating describes.
+            This attempt is finished. Nothing about it is saved — a rating, if one is shown, is
+            shown once, in the pane, for this attempt only. Start a new session to attempt it
+            again — grading or reverting now would change what this attempt showed.
           </div>
         ) : null}
         <button

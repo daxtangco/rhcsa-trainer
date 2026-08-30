@@ -164,10 +164,19 @@ function nonLiteralIds(script: string): string[] {
  * Deliberately narrow. This decides what `changesNothing` is allowed to *ignore*,
  * so widening it makes that rule fire more often — a false fail on the bank — while
  * keeping it narrow only ever leaves a no-op fixture unreported. The `[-+]` covers
- * both directions of an option and the trailing `pipefail` of `set -euo pipefail`
- * needs no clause of its own, because the whole line is what matches.
+ * both directions of an option, and `[^;]*$` anchors the match to the end of the
+ * line: a real command joined on with `;` breaks the match, so the line is judged
+ * as code rather than discarded with the option prefix.
+ *
+ * This used to be start-anchored only (`/^set\s+[-+]/`), with no trailing `$` and
+ * no exclusion of `;`. `.test()` only needs a match to exist anywhere in the
+ * string, so `set -euo pipefail; sudo lvextend -L 12G /dev/rhel/home` matched on
+ * the `set -` prefix alone and `changesNothing` discarded the **whole line** —
+ * including the real command after the `;` — as a no-op. That is the opposite of
+ * narrow: it silently swallowed a command the same way a start-anchor was meant to
+ * keep out.
  */
-const SHELL_OPTION_LINE = /^set\s+[-+]/
+const SHELL_OPTION_LINE = /^set\s+[-+][^;]*$/
 
 /**
  * Whether a fixture body could not have changed the machine: nothing in it but
@@ -537,10 +546,10 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
     // "The floors could not be checked" is itself a problem, for the same reason as
     // the guard above: a gate exiting 0 having skipped its checks.
     //
-    // This condition is about the **message**, not about the rules. The rules ran
-    // unconditionally above and nothing here can suppress them; all that is decided
-    // here is whether the loader's failure earns a line. It does if the walk found a
-    // grader **or** there is a regular file at `<root>/objectives.yaml`.
+    // This condition is about the **message**, not about the rules. The rules above
+    // are not gated on this condition, and nothing here can suppress them; all that
+    // is decided here is whether the loader's failure earns a line. It does if the
+    // walk found a grader **or** there is a regular file at `<root>/objectives.yaml`.
     //
     // `objectives.yaml` is the discriminator because it is the bank's root manifest —
     // its presence is what separates *"nobody authored a bank here"* from *"a bank is

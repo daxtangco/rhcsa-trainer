@@ -221,6 +221,16 @@ export function App() {
     return <TaskPicker tasks={tasks} error={error} busy={starting} onStart={start} />
   }
 
+  // `rating === null` is ambiguous on its own: the server answers it both when
+  // the mode is guided and when the report cannot support a claim (see
+  // `reportSuspect` in `src/server/session.ts`). The client does not need a new
+  // field to tell the two apart — it already has `session.mode` and the same
+  // `report` fields `Rail` reads for its own withholding, so the same
+  // computation done there is repeated here rather than invented.
+  const reportUntrustworthy =
+    report !== undefined &&
+    (report.incomplete || report.countDisputed || report.total > report.expectedTotal)
+
   return (
     <div className="flex h-screen flex-col bg-zinc-950">
       <header className="border-b border-zinc-800 p-4">
@@ -276,20 +286,32 @@ export function App() {
             <div className="m-2 rounded border border-zinc-700 bg-zinc-900 p-4 text-sm text-zinc-200">
               {rating !== null ? (
                 <>
-                  Attempt finished. Scheduler rating: <strong>{rating}</strong>. This is derived
-                  from the grade, the rung you needed and the time you took — nothing here is
-                  self-reported.{' '}
+                  Attempt finished. Rating (not saved): <strong>{rating}</strong>. Computed from
+                  the grade, the rung you needed and the time you took for this attempt only —
+                  nothing here is self-reported, and nothing here persists.{' '}
+                </>
+              ) : session.mode === 'guided' ? (
+                <>
+                  Attempt finished. Guided mode computes no rating: it hands you the solution, so
+                  how fast you got there says nothing about whether you can do it cold. Run the
+                  same task in practice or drill mode when you want one.{' '}
+                </>
+              ) : reportUntrustworthy ? (
+                <>
+                  Attempt finished. No rating: this run&apos;s checkpoint count could not be
+                  trusted (see the warning in the sidebar), so there is nothing honest a rating
+                  could be computed from.{' '}
                 </>
               ) : (
-                <>
-                  Attempt finished. Guided mode records no scheduler rating: it hands you the
-                  solution, so how fast you got there says nothing about whether you can do it
-                  cold. Run the same task in practice or drill mode when you want one.{' '}
-                </>
+                // Should not happen — the server withholds a rating only for a
+                // guided mode or an untrustworthy report, and both are handled
+                // above. Kept honest rather than silently falling back to
+                // either claim above if that guard ever changes shape.
+                <>Attempt finished. No rating for this attempt.{' '}</>
               )}
               Hint, Grade and Reset are inactive from here, and so are F2, F4 and F8: grading again
-              would change the report this attempt was recorded against. Start a new session to
-              attempt the task again.
+              would change what this attempt showed. Start a new session to attempt the task
+              again.
             </div>
           ) : null}
         </main>

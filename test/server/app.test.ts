@@ -507,6 +507,25 @@ describe('grading and finishing', () => {
     expect(at(done, 'rating')).toBe('hard')
   })
 
+  it('500s /grade with the transport\'s message when gradeTask rejects, and never records a report', async () => {
+    // F13: the one real-transport failure mode that is not an exit code — a
+    // rejecting exec, surfacing here as a rejecting gradeTask — has no test
+    // anywhere in the suite. `/grade`'s catch (app.ts) must turn it into a 500
+    // carrying the transport's own message, and must not call
+    // `sessions.record`, so a later request sees no stale result.
+    const { a, sessions } = app({
+      gradeTask: async () => {
+        throw new Error('no guest IP could be determined')
+      },
+    })
+    const id = await start(a, 'practice')
+
+    const res = await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })
+    expect(res.status).toBe(500)
+    expect(str(await res.json(), 'error')).toMatch(/no guest IP could be determined/)
+    expect(sessions.get(id)?.result).toBeUndefined()
+  })
+
   it('names the checkpoints immediately in practice mode', async () => {
     const { a } = app()
     const id = await start(a, 'practice')
