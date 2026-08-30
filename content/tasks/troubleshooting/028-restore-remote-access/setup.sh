@@ -18,17 +18,34 @@ need() { "$@" || { printf 'setup.sh: FAILED: %s\n' "$*" >&2; exit 1; }; }
 # idempotent-removal commands and this file is full of them.
 fail() { printf 'setup.sh: %s\n' "$*" >&2; exit 1; }
 
-conn=$(nmcli -t -f NAME connection show --active 2>/dev/null | head -1)
-if [ -z "$conn" ]; then
-  conn=$(nmcli -t -f NAME connection show 2>/dev/null | head -1)
+# The profile to break is the one carrying the DEFAULT ROUTE - the network the
+# student reaches this box over - resolved in the same two steps
+# selinux/019/setup.sh uses, with a byte-identical awk so the two can be diffed.
+# The previous `nmcli -t -f NAME connection show --active | head -1` took whichever
+# row sorted first, and NetworkManager 1.42+ (RHEL 9.2+) manages loopback: if `lo`
+# sorted first this script would have set autoconnect no on LOOPBACK, recorded `lo`
+# below, and the break would never have happened. net-autoconnect would then
+# measure `lo`, every fixture would pass, and the task whose whole subject is
+# restoring remote access would be silently green end to end. The route is also the
+# more faithful reading of what this file means by "the connection": not any
+# profile, the one remote access actually arrives on.
+dev=$(ip -o route show default 2>/dev/null | awk '{for (n=1; n<NF; n++) if ($n == "dev") { print $(n+1); exit }}')
+conn=""
+if [ -n "$dev" ]; then
+  # `device show` prints the owning profile's name, or `--` for a device with none.
+  conn=$(nmcli -g GENERAL.CONNECTION device show "$dev" 2>/dev/null | head -1)
+  [ "$conn" = "--" ] && conn=""
 fi
-# Without this guard an empty $conn writes a blank /etc/rhcsa-conn, the nmcli
-# modify below fails into nothing, the machine is not actually broken, and the
-# baseline fixture reports "net-autoconnect passed at baseline" - a real
-# failure reported as entirely the wrong thing.
+# The empty-$conn guard, kept: without it an empty $conn writes a blank
+# /etc/rhcsa-conn, the nmcli modify below fails into nothing, the machine is not
+# actually broken, and the baseline fixture reports "net-autoconnect passed at
+# baseline" - a real failure reported as entirely the wrong thing. It now also
+# covers "no default route" and "no profile owns that device", and it fails LOUDLY
+# instead of falling back to whichever inactive profile sorted first, the way the
+# old second lookup did. A guest that cannot run this task has to stop here: the
+# alternative is staging the break somewhere it teaches nothing.
 if [ -z "$conn" ]; then
-  printf 'setup.sh: FAILED: no NetworkManager connection found; cannot stage the break\n' >&2
-  exit 1
+  fail "cannot identify the connection carrying the default route (route device '${dev:-none}'), so there is nowhere to break remote access that the task would measure; this guest was not built to docs/vm-build-checklist.md"
 fi
 printf '%s\n' "$conn" | sudo tee /etc/rhcsa-conn >/dev/null ||
   { printf 'setup.sh: FAILED: recording the connection name in /etc/rhcsa-conn\n' >&2; exit 1; }
@@ -97,10 +114,11 @@ defzone=$(sudo firewall-cmd --get-default-zone 2>/dev/null)
 [ -n "$defzone" ] \
   || fail "cannot read the default firewalld zone, which is the zone every firewall checkpoint in this task measures"
 
-# The device is derived, never hardcoded. An active connection reports it in
-# GENERAL.DEVICES; a profile that pins one reports connection.interface-name.
-dev=$(nmcli -g GENERAL.DEVICES connection show "$conn" 2>/dev/null | head -1)
-[ -n "$dev" ] || dev=$(nmcli -g connection.interface-name connection show "$conn" 2>/dev/null | head -1)
+# $dev is the default-route device established at the top of this file, and $conn is
+# the profile that owns it. This used to re-derive $dev from $conn through
+# GENERAL.DEVICES, which would now be a second derivation of the same fact by a
+# different route: if the two ever disagreed, the zone check below would measure one
+# interface while the break landed on another. Derived once, above, deliberately.
 
 # The permanent half, and the one that matters most here because firewall-ssh is
 # itself a permanent check: connection.zone re-binds the interface at every boot,
@@ -121,7 +139,12 @@ if [ -n "$dev" ]; then
   [ -z "$otherzone" ] \
     || fail "interface $dev is in firewalld zone '$otherzone', not the default zone '$defzone', so firewall-ssh would pass while ssh stayed blocked; this guest was not built to docs/vm-build-checklist.md"
 else
-  fail "cannot determine which interface connection '$conn' uses, so it is not possible to prove firewall-ssh measures the zone that filters this guest's traffic"
+  # Unreachable as written - the guard at the top of this file already fails when the
+  # route device cannot be determined. Kept anyway, and not as decoration: with an
+  # empty $dev the awk above compares every interface against "", matches nothing,
+  # finds no other zone and PASSES. So if a later edit ever moves or loosens the
+  # derivation, this is what stops the check from silently going quiet.
+  fail "the default-route device is empty at the zone check, so it is not possible to prove firewall-ssh measures the zone that filters this guest's traffic"
 fi
 
 # net-autoconnect: exactly the grader's probe, against the name it will read
