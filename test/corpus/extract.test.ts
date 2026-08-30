@@ -105,6 +105,60 @@ describe('findItems', () => {
     expect(lineCount).toBe(121)
     expect(ex?.text).not.toMatch(/filler line 199/)
   })
+
+  it('trims leading whitespace from an indented heading and trailing whitespace from the body', () => {
+    // Fix-1 F1: the body is joined and then `.replace(...).trim()`'d, but
+    // nothing asserted on either boundary — a heading matched via the
+    // regexes' `\s*` tolerance keeps its leading indentation, and a body
+    // ending right before end-of-input keeps its trailing blank lines,
+    // unless `.trim()` actually runs.
+    const indented = ['   Exercise 22-1 Some description', '1. Do the first step.', '2. Do the second step.', '', ''].join(
+      '\n',
+    )
+
+    const items = findItems(indented, 'r9')
+    const ex = items.find((i) => i.id === 'Exercise 22-1')
+    expect(ex?.text.startsWith('Exercise 22-1 Some description')).toBe(true)
+    expect(ex?.text.endsWith('step.')).toBe(true)
+  })
+
+  it('collapses three or more consecutive blank lines inside a body to a single blank line', () => {
+    // Fix-1 F1: distinct from the trim test above — this run of blank lines
+    // sits between two real content lines, so only `.replace(/\n{3,}/g, ...)`
+    // (not `.trim()`, which only touches the ends) can collapse it.
+    const blankRun = [
+      'Exercise 23-1 First step',
+      'line one of body.',
+      '',
+      '',
+      '',
+      '',
+      'line two of body, after several blank lines.',
+      'Exercise 23-2 Next exercise',
+      'body of next exercise.',
+    ].join('\n')
+
+    const items = findItems(blankRun, 'r9')
+    const ex = items.find((i) => i.id === 'Exercise 23-1')
+    expect(ex?.text).not.toMatch(/\n{3,}/)
+    expect(ex?.text).toContain('of body.\n\nline two')
+  })
+
+  it('returns items sorted by id even when headings appear out of order in the source text', () => {
+    // Fix-1 F2: every existing fixture's headings happen to already appear in
+    // id order in the source, so the final `.sort(...)` in findItems could be
+    // deleted without any test noticing. Here the source order is reversed.
+    const outOfOrder = [
+      'Exercise 24-2 This appears first in the source text',
+      'body of exercise two.',
+      '',
+      'Exercise 24-1 This appears second in the source text',
+      'body of exercise one.',
+    ].join('\n')
+
+    const items = findItems(outOfOrder, 'r9').filter((i) => i.kind === 'exercise')
+    expect(items.map((i) => i.id)).toEqual(['Exercise 24-1', 'Exercise 24-2'])
+  })
 })
 
 describe('weightSignal', () => {
