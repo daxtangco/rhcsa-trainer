@@ -57,9 +57,15 @@ if sudo systemd-analyze verify rhcsa-stamp.service &>/dev/null; then
   fail "systemd already accepts rhcsa-stamp.service; unit-verifies would pass at baseline"
 fi
 
-# stamp-enabled: exactly the grader's probe, anchored the same way.
+# stamp-enabled: exactly the grader's probe, anchored the same way - which means
+# grep -qx, because that is what the grader uses. `state` captures stderr as well,
+# so a hint printed alongside the state makes `[ "$state" != "enabled" ]` compare a
+# two-line blob and quietly stop matching, and setup would stage a guest where
+# stamp-enabled passed at baseline.
 state=$(systemctl is-enabled rhcsa-stamp.service 2>&1)
-[ "$state" != "enabled" ] || fail "rhcsa-stamp.service is still enabled; stamp-enabled would pass at baseline"
+if printf '%s' "$state" | grep -qx enabled; then
+  fail "rhcsa-stamp.service is still enabled (is-enabled=$state); stamp-enabled would pass at baseline"
+fi
 
 # stamp-effect rests entirely on /run being a tmpfs: that is the only reason a
 # marker found there after the reboot proves systemd ran the unit at boot
@@ -84,8 +90,14 @@ need sudo rm -f /run/rhcsa-stamp
 target=$(systemctl get-default 2>&1)
 [ "$target" = "multi-user.target" ] \
   || fail "get-default reports '$target' after set-default; the default-target invariant would fail for every fixture"
-systemctl is-enabled sshd &>/dev/null \
-  || fail "sshd is not enabled after 'systemctl enable sshd'; the sshd-intact invariant would fail for every fixture"
+# sshd-intact's grader probe is `grep -qx enabled` as of the F15 commit, so this
+# has to be too. On the bare exit status setup accepted static, indirect,
+# generated, alias and enabled-runtime while the grader rejects them - and the
+# invariant would then fail for every fixture, which is the exact outcome the two
+# checks above exist to rule out.
+sshd_state=$(systemctl is-enabled sshd 2>&1)
+printf '%s' "$sshd_state" | grep -qx enabled \
+  || fail "sshd reports is-enabled='$sshd_state', not enabled, after 'systemctl enable sshd'; the sshd-intact invariant would fail for every fixture"
 
 cat /dev/null > ~/.bash_history 2>/dev/null || true
 history -c 2>/dev/null || true

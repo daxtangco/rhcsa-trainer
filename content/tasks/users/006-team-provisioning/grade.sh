@@ -26,9 +26,24 @@ ck carol-in-devops "carol is a member of devops" $?
 # midnight and integer-divides by 86400, and both `chage -E` and `useradd -e`
 # go through it. Comparing against a UTC midnight instead is off by one day on
 # every guest ahead of UTC. Do not add -u here.
-want=$(( $(date -d 2027-06-30 +%s) / 86400 ))
+#
+# Two steps, not one. Nested inside the arithmetic, a `date` that emitted nothing
+# would leave `want` unset, the comparison below would trip `set -u`, and the
+# grader would die mid-run: carol-expiry, alice-maxdays, sudo-devops and
+# student-intact would VANISH from the JSONL instead of failing. A checkpoint that
+# is absent reads as a pass to anything counting failures, which is the one thing
+# the JSONL contract exists to prevent. Unreachable with GNU coreutils, and
+# fail-closed anyway: the epoch read is tested directly below rather than through
+# the value derived from it, so no shadow field 8 - not 0, not the sentinel string
+# itself - can make this pass on a host where `date` produced nothing.
+want_epoch=$(date -d 2027-06-30 +%s 2>/dev/null)
+if [ -n "$want_epoch" ]; then
+  want=$(( want_epoch / 86400 ))
+else
+  want=unavailable
+fi
 days=$(sudo getent shadow carol | cut -d: -f8)
-[ -n "$days" ] && [ "$days" = "$want" ]
+[ -n "$want_epoch" ] && [ -n "$days" ] && [ "$days" = "$want" ]
 ck carol-expiry "carol's account expires 2027-06-30" $? "shadow field 8=${days:-empty}, want=$want"
 
 max=$(sudo getent shadow alice | cut -d: -f5)

@@ -71,9 +71,17 @@ repos=(/etc/yum.repos.d/*.repo)
 [ -e "${repos[0]}" ] \
   || fail "no dnf repository is configured, so 'dnf -y install httpd' cannot work; see docs/vm-build-checklist.md"
 
-# httpd-enabled: httpd must not already be enabled at boot.
+# httpd-enabled: httpd must not already be enabled at boot. Anchored on the exact
+# string with grep -qx, the same spelling as the grader's checkpoint and as 028's
+# mirroring precondition. Not only for uniformity: `state` captures stderr too, so
+# if is-enabled ever prints a hint alongside the state, `[ "$state" != "enabled" ]`
+# compares the whole two-line blob and silently stops matching, while grep -qx
+# still finds the line. That direction is a fail-open - setup would proceed
+# believing httpd is disabled while httpd-enabled passed at baseline.
 state=$(systemctl is-enabled httpd 2>&1)
-[ "$state" != "enabled" ] || fail "httpd is still enabled after the remove; httpd-enabled would pass at baseline"
+if printf '%s' "$state" | grep -qx enabled; then
+  fail "httpd is still enabled after the remove (is-enabled=$state); httpd-enabled would pass at baseline"
+fi
 
 # page-served: nothing may already be answering on TCP 82. Same probe the
 # grader's sibling checkpoint in troubleshooting/028 uses, for the same reason.
@@ -126,11 +134,16 @@ defzone=$(sudo firewall-cmd --get-default-zone 2>/dev/null)
 [ -n "$defzone" ] \
   || fail "cannot read the default firewalld zone, which is the zone both firewall checkpoints measure"
 
-# Derived, never hardcoded: the device behind the active NetworkManager
-# connection, falling back to the device on the default route.
-dev=$(nmcli -g DEVICE connection show --active 2>/dev/null | head -1)
+# Derived, never hardcoded, and the DEFAULT ROUTE is the primary source. The
+# nmcli form on its own can return `lo`: NetworkManager 1.42+ (RHEL 9.2+) manages
+# loopback, so `connection show --active` lists it, and `lo` is in no zone - which
+# the check below deliberately treats as fine. Those two correct behaviours
+# combine into exactly the false pass this block exists to prevent: the check
+# would pass on `lo` while the real NIC sat in a wrong zone. So ask which
+# interface this guest actually answers on, and exclude `lo` from the fallback.
+dev=$(ip -o route show default 2>/dev/null | awk '{for (n=1; n<NF; n++) if ($n == "dev") { print $(n+1); exit }}')
 [ -n "$dev" ] \
-  || dev=$(ip -o route show default 2>/dev/null | awk '{for (n=1; n<NF; n++) if ($n == "dev") { print $(n+1); exit }}')
+  || dev=$(nmcli -g DEVICE connection show --active 2>/dev/null | grep -vxF lo | head -1)
 
 if [ -n "$dev" ]; then
   # --get-active-zones lists only zones with something bound, so an interface
@@ -142,9 +155,13 @@ if [ -n "$dev" ]; then
   [ -z "$otherzone" ] \
     || fail "interface $dev is in firewalld zone '$otherzone', not the default zone '$defzone', so both firewall checkpoints would pass while port 82 stayed closed to other machines; this guest was not built to docs/vm-build-checklist.md"
   # firewall-permanent survives a reboot, and so does connection.zone: a profile
-  # pinning a non-default zone re-binds the interface every boot.
-  aconn=$(nmcli -g NAME connection show --active 2>/dev/null | head -1)
-  if [ -n "$aconn" ]; then
+  # pinning a non-default zone re-binds the interface every boot. Asked of the
+  # profile that owns THIS device rather than of the first active row, for the same
+  # reason the device is derived from the route: `-g NAME connection show --active`
+  # can name the `lo` profile, whose zone says nothing about the interface that
+  # carries port 82. `device show` prints `--` when a device has no profile.
+  aconn=$(nmcli -g GENERAL.CONNECTION device show "$dev" 2>/dev/null | head -1)
+  if [ -n "$aconn" ] && [ "$aconn" != "--" ]; then
     czone=$(nmcli -g connection.zone connection show "$aconn" 2>/dev/null)
     if [ -n "$czone" ] && [ "$czone" != "$defzone" ]; then
       fail "connection '$aconn' pins firewalld zone '$czone', not the default zone '$defzone', so both firewall checkpoints would pass while port 82 stayed closed to other machines; this guest was not built to docs/vm-build-checklist.md"

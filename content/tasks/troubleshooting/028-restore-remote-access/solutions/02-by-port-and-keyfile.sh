@@ -17,9 +17,17 @@ conn=$(cat /etc/rhcsa-conn)
 # <setting>.<property> and cannot return it, so `-g FILENAME connection show
 # "$conn"` fails - and under `set -euo pipefail` that aborts the whole script.
 # So look the row up in list mode, keyed on the UUID rather than on the name: a
-# connection name may contain a colon (nmcli escapes it as `\:`), which breaks
-# both `-F:` field splitting and the `$1==name` comparison. A UUID cannot. The
-# sub() takes everything after the first colon so a colon in the path is safe too.
+# connection name may contain a colon (nmcli escapes it as `\:`), which breaks both
+# `-F:` field splitting and the `$1==name` comparison. A UUID cannot, and a name
+# with spaces is fine because nothing here splits on whitespace.
+#
+# A colon in the FILENAME is NOT handled, and this comment used to claim it was.
+# nmcli escapes it as `\:` in terse output and the sub() below does not un-escape
+# it, so `$file` would keep the backslash and the sed would fail loudly on a path
+# that does not exist. That outcome is acceptable and is still better than the
+# older name-keyed form, which returned empty and edited nothing: a keyfile path is
+# derived from the profile name, so this needs a profile named with a colon, and it
+# stops the fixture with an error instead of reporting success having done nothing.
 uuid=$(nmcli -g connection.uuid connection show "$conn")
 file=$(sudo nmcli -g UUID,FILENAME connection show \
   | awk -F: -v u="$uuid" '$1==u { sub(/^[^:]*:/, ""); print; exit }')
