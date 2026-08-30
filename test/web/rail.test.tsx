@@ -74,6 +74,7 @@ describe('Rail', () => {
       total: 2,
       expectedTotal: 2,
       incomplete: false,
+      countDisputed: false,
       allPassed: false,
       rebooted: true,
       regressionCount: 0,
@@ -92,6 +93,7 @@ describe('Rail', () => {
       total: 5,
       expectedTotal: 5,
       incomplete: false,
+      countDisputed: false,
       allPassed: false,
       rebooted: true,
       regressionCount: 0,
@@ -109,6 +111,7 @@ describe('Rail', () => {
       total: 5,
       expectedTotal: 5,
       incomplete: false,
+      countDisputed: false,
       allPassed: false,
       rebooted: true,
       regressionCount: 1,
@@ -123,6 +126,7 @@ describe('Rail', () => {
       total: 5,
       expectedTotal: 5,
       incomplete: false,
+      countDisputed: false,
       allPassed: false,
       rebooted: false,
       rebootError: 'guest did not come back within 120000ms',
@@ -188,6 +192,7 @@ describe('Rail', () => {
       total: 3,
       expectedTotal: 7,
       incomplete: true,
+      countDisputed: false,
       allPassed: false,
       rebooted: true,
       regressionCount: 0,
@@ -252,6 +257,7 @@ describe('Rail', () => {
       total: 6,
       expectedTotal: 5,
       incomplete: false,
+      countDisputed: false,
       allPassed: true,
       rebooted: true,
       regressionCount: 0,
@@ -279,6 +285,7 @@ describe('Rail', () => {
       total: 3,
       expectedTotal: 0,
       incomplete: false,
+      countDisputed: false,
       allPassed: true,
       rebooted: true,
       regressionCount: 0,
@@ -295,12 +302,47 @@ describe('Rail', () => {
     expect(screen.queryByText(/is not a score/i)).toBeNull()
   })
 
+  it('withholds the pass when the count is disputed even though every number agrees', () => {
+    // The quiet member of the class, and the reason the over-arrival check above
+    // is not enough on its own: the count is *deflated*, so the arrivals match it.
+    // `total === expectedTotal` means `incomplete` is false and nothing
+    // over-arrived, `allPassed` is true, and the two warnings above are both
+    // unreachable. `countDisputed` is the only thing on this report that knows.
+    const report: GradeReportView = {
+      passed: 3,
+      total: 3,
+      expectedTotal: 3,
+      incomplete: false,
+      countDisputed: true,
+      allPassed: true,
+      rebooted: true,
+      regressionCount: 0,
+    }
+    render(<Rail {...props} session={session()} rung={1} report={report} />)
+    expect(screen.getByText(/declares checkpoints that its own checkpoint count cannot see/i))
+      .toBeDefined()
+    // Withheld in both directions: not a pass, and not dressed up as a failure
+    // either - the count is the suspect, not the machine.
+    expect(screen.queryByText('All checkpoints passed.')).toBeNull()
+    expect(screen.queryByText('Not all checkpoints passed.')).toBeNull()
+    // And not the over-arrival copy, whose "(3 reported, 3 expected)" would read as
+    // nonsense here.
+    expect(screen.queryByText(/checkpoint count is wrong/i)).toBeNull()
+    // Nor the truncation copy: nothing stopped early here, so "reported 3 of 3 and
+    // then stopped" would describe a different failure.
+    expect(screen.queryByText(/and then stopped/i)).toBeNull()
+    // Never withhold the exit. Finish stays live, because a student must always be
+    // able to close a session they cannot be scored on.
+    expect(screen.getByRole('button', { name: /finish/i }).getAttribute('disabled')).toBeNull()
+  })
+
   it('withholds the pass when the reboot check never ran on a task that declares one', () => {
     const report: GradeReportView = {
       passed: 5,
       total: 5,
       expectedTotal: 5,
       incomplete: false,
+      countDisputed: false,
       allPassed: true,
       rebooted: false,
       rebootError: 'guest did not come back within 120000ms',
@@ -321,6 +363,7 @@ describe('Rail', () => {
       total: 5,
       expectedTotal: 5,
       incomplete: false,
+      countDisputed: false,
       allPassed: true,
       rebooted: false,
       regressionCount: 0,
@@ -342,6 +385,7 @@ describe('Rail', () => {
       total: 5,
       expectedTotal: 5,
       incomplete: false,
+      countDisputed: false,
       allPassed: true,
       rebooted: true,
       regressionCount: 0,

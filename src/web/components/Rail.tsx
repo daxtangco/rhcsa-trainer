@@ -90,7 +90,18 @@ export function Rail(props: RailProps) {
   // and an under-count is exactly what switches `incomplete` off, which is why
   // this needs its own signal rather than riding on that flag. `expectedTotal`
   // of 0 with checkpoints arriving is the measured shape of it.
-  const countSuspect = report !== undefined && report.total > report.expectedTotal
+  const countOverArrived = report !== undefined && report.total > report.expectedTotal
+
+  // The same defect one degree quieter, and the reason the check above is not
+  // enough on its own: when the count is deflated rather than collapsed, the
+  // arrivals *match* it. Eight checkpoints declared, a heredoc fail-open takes the
+  // count to three, the grader dies after three - and total == expectedTotal, so
+  // nothing above fires and nothing in `incomplete` fires either. The server
+  // reconciles the count against the grade script's own headers and reports the
+  // disagreement as `countDisputed`; this is the only signal on the screen that
+  // sees that case.
+  const countDisputed = report !== undefined && report.countDisputed
+  const countSuspect = countOverArrived || countDisputed
 
   // The task declares that its change has to survive a restart, and the restart
   // did not happen. Today the grader only reaches `rebooted: false` with
@@ -167,11 +178,19 @@ export function Rail(props: RailProps) {
           </div>
         ) : null}
 
-        {countSuspect && report !== undefined ? (
+        {countOverArrived && report !== undefined ? (
           <div className={`mt-1 ${WARN}`}>
             This lab's checkpoint count is wrong ({report.total} reported, {report.expectedTotal}{' '}
             expected). The result may be unreliable — please re-run. Nothing here is your doing:
             the number the grade is scored against is what is broken.
+          </div>
+        ) : null}
+
+        {countDisputed ? (
+          <div className={`mt-1 ${WARN}`}>
+            This lab's grade script declares checkpoints that its own checkpoint count cannot see,
+            so the number this run was scored against is too low and no result can be read off it.
+            Nothing here is your doing, and this is not a score — the lab needs fixing.
           </div>
         ) : null}
 

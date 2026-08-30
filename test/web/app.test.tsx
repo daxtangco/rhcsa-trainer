@@ -42,6 +42,7 @@ const REPORT: GradeReportView = {
   total: 5,
   expectedTotal: 5,
   incomplete: false,
+  countDisputed: false,
   allPassed: true,
   rebooted: true,
   regressionCount: 0,

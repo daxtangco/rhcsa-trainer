@@ -7,6 +7,7 @@ import {
 } from '../engine/disclosure/ladder.ts'
 import { finalVerdict, type GradeResult } from '../engine/grading/grader.ts'
 import { allPassed, statusById, type CheckpointStatus } from '../engine/grading/verdict.ts'
+import { declaredCheckpointIds } from '../engine/validate/expectations.ts'
 
 export type SessionMode = 'guided' | LadderMode
 export type SessionPhase = 'active' | 'graded'
@@ -18,6 +19,15 @@ export interface SessionRecord {
   rung: Rung
   /** Number of checkpoints the grader will emit, known before grading. */
   checkpointTotal: number
+  /**
+   * Checkpoint ids the grader's own headers declare that `checkpointIds` never
+   * saw — the second witness disagreeing with the first. Empty means the two
+   * agree **or** that the grader declared nothing to cross-check against; see
+   * `checkpointCount`. Carried on the record because it describes exactly the
+   * `checkpointTotal` stored beside it, and `reportFor` compares against that
+   * number long after the script that produced it was read.
+   */
+  missingDeclared: string[]
   startedAt: number
   endedAt?: number
   phase: SessionPhase
@@ -493,6 +503,59 @@ export function countCheckpoints(gradeScript: string): number {
   return checkpointIds(gradeScript).length
 }
 
+/**
+ * How many checkpoints a grader will emit, **and whether anything agrees with
+ * that number**.
+ *
+ * `countCheckpoints` is one witness, and every guard downstream of it —
+ * `incomplete`, the over-arrival warn below, the client's `countSuspect` — is
+ * derived from it, so a wrong count disables its own defences. The measured shape:
+ * one `cat <<NOPE` after the first `ck` in
+ * `content/tasks/selinux/019-httpd-alt-port/grade.sh` makes the lexer swallow the
+ * remainder of the file and return **1** where the honest answer is 8. Three
+ * passing arrivals against a count deflated to three then reads clean on every
+ * existing signal at once: `status.size < expectedTotal` is false so `incomplete`
+ * is false, `status.size > expectedTotal` is false so nothing warns, `allPassed` is
+ * true, and `report.total > report.expectedTotal` is false so the rail says pass. A
+ * grader that died three checkpoints into eight tells the student they passed.
+ * Collapse to 0 — the case this project tracked for four rounds — is the *only*
+ * member of that class any existing guard catches.
+ *
+ * So this asks a second, independent witness: the grader's own declared header
+ * set (`declaredCheckpointIds`). Every declared id must be one the lexer saw. The
+ * check is containment rather than a count comparison because the two sets are not
+ * the same set — an invariant that passes at baseline is emitted and declared by no
+ * header, so `emitted` legitimately exceeds `declared` and comparing sizes would
+ * fail every grader in the bank. Containment is what `rhcsa lint` already
+ * reconciles, which is why lint catches partial deflation (measured: exit 1, 9
+ * problems) while the serving path did not.
+ *
+ * **A grader that declares nothing yields `crossChecked: false` and no missing
+ * ids** — "no cross-check available", not "suspect". Not every grade script must
+ * carry a header, and treating absence as evidence would withhold a verdict from a
+ * correct run over a grader that is merely terse, which is the false-fail direction
+ * this guard exists to avoid making. The residual is stated plainly: a grader with
+ * no headers has no second witness, and nothing here can invent one.
+ */
+export interface CheckpointCount {
+  /** What the lexer found: distinct ids in the grade script text. */
+  total: number
+  /** Declared ids the lexer never saw. Non-empty means the two witnesses disagree. */
+  missingDeclared: string[]
+  /** Whether the grader declared anything at all, i.e. whether a second witness existed. */
+  crossChecked: boolean
+}
+
+export function checkpointCount(gradeScript: string): CheckpointCount {
+  const emitted = new Set(checkpointIds(gradeScript))
+  const declared = declaredCheckpointIds(gradeScript)
+  return {
+    total: emitted.size,
+    missingDeclared: declared.filter((id) => !emitted.has(id)),
+    crossChecked: declared.length > 0,
+  }
+}
+
 export function maxRungFor(mode: SessionMode): Rung {
   // Guided mode has no ladder to climb: everything is open from the start.
   return mode === 'guided' ? TOP_RUNG : MAX_RUNG[mode]
@@ -523,12 +586,52 @@ export interface GradeReport {
   expectedTotal: number
   /** The grader emitted fewer checkpoints than it declares. */
   incomplete: boolean
+  /**
+   * `expectedTotal` is contradicted by the grader's own headers, so no comparison
+   * against it means anything — see `checkpointCount`. A **field** rather than a
+   * log line, because the two things that must act on it are the rating path and
+   * the client, and `console.warn` reaches neither: that invisibility is half of
+   * why a deflated count reached a clean pass.
+   *
+   * It does not touch `allPassed`, deliberately. Turning a suspect report into a
+   * failing one trades a false pass for a false fail, and the count is the suspect
+   * here rather than the machine. Callers withhold on this; see `reportSuspect`.
+   */
+  countDisputed: boolean
+  /**
+   * Which declared ids the counter missed. Masked exactly like `checkpoints`,
+   * because a checkpoint id is answer-key material in drill and exam mode. For
+   * the grader's author, who is the only person who can act on it.
+   */
+  disputedIds?: string[]
   allPassed: boolean
   rebooted: boolean
   rebootError?: string
   regressionCount: number
   checkpoints?: MaskedCheckpoint[]
   regressions?: string[]
+}
+
+/**
+ * Whether this report can support a truth-claim about the attempt in **either**
+ * direction. Three independent ways for `expectedTotal` to be useless as a
+ * yardstick, and the caller must consult all three or it is guarding one door of
+ * three:
+ *
+ * - `incomplete` — fewer distinct ids arrived than were declared. The ones that
+ *   never ran are unknown, not passed.
+ * - `countDisputed` — the declared header set names ids the counter never saw, so
+ *   the count itself is deflated and `incomplete` cannot fire.
+ * - `total > expectedTotal` — more ids arrived than were declared, which the
+ *   grader cannot be blamed for, so the counter under-counted.
+ *
+ * The rail derives the last two independently for its own withholding (see
+ * `Rail.tsx`); this is the server-side half, and `deriveRating` is its caller.
+ * Withhold on it — never *fail* on it, and never let it disable Finish. A student
+ * must always be able to close a session.
+ */
+export function reportSuspect(report: GradeReport): boolean {
+  return report.incomplete || report.countDisputed || report.total > report.expectedTotal
 }
 
 /**
@@ -539,12 +642,20 @@ export interface GradeReport {
  * `expectedTotal` is the session's `checkpointTotal`, counted statically from
  * the grade script before anything ran. It is the only thing standing between a
  * truncated grader run and a false pass — see the `incomplete` comment below.
+ *
+ * `missingDeclared` is the session's, from `checkpointCount`: the declared ids that
+ * count never saw. Its default is the **empty** array and that is the honest
+ * neutral value rather than a fail-open, because empty already means "the two
+ * witnesses agree or there was only one" everywhere else in this module — a caller
+ * with no second witness and a caller who omits the argument are in the same
+ * epistemic position. `app.ts` passes the session's, at both call sites.
  */
 export function reportFor(
   mode: SessionMode,
   result: GradeResult,
   revealed: boolean,
   expectedTotal: number,
+  missingDeclared: readonly string[] = [],
 ): GradeReport {
   // finalVerdict returns verdict B when there was one: what survives is what
   // counts.
@@ -583,11 +694,25 @@ export function reportFor(
     )
   }
 
+  // The third direction, and the one every other signal on this report is blind
+  // to: the count `expectedTotal` came from disagrees with the grader's own
+  // headers, so both comparisons above are made against a number that is wrong.
+  // Warned as well as reported, because an operator tailing the log is who can
+  // re-run `rhcsa lint` and see the nine problems it lists.
+  const countDisputed = missingDeclared.length > 0
+  if (countDisputed) {
+    console.warn(
+      `[grade] the grade script declares ${missingDeclared.join(', ')}, which its checkpoint count` +
+        ` never saw; expectedTotal ${expectedTotal} is deflated and this run cannot be scored`,
+    )
+  }
+
   const report: GradeReport = {
     passed: [...status.values()].filter((s) => s === 'pass').length,
     total: status.size,
     expectedTotal,
     incomplete,
+    countDisputed,
     allPassed: allPassed(v) && !incomplete,
     rebooted: result.rebooted,
     regressionCount: result.regressions.length,
@@ -602,6 +727,7 @@ export function reportFor(
     for (const c of v.checkpoints) rows.set(c.id, { id: c.id, desc: c.desc, status: c.status })
     report.checkpoints = [...rows.values()]
     report.regressions = result.regressions.map((c) => c.id)
+    if (countDisputed) report.disputedIds = [...missingDeclared]
   }
 
   return report
@@ -611,14 +737,22 @@ export class SessionStore {
   #byId = new Map<string, SessionRecord>()
   #seq = 0
 
-  create(taskId: string, mode: SessionMode, checkpointTotal: number, now: number): SessionRecord {
+  /**
+   * `count` is the whole `CheckpointCount` rather than its `total`, so a caller
+   * cannot record the number without carrying what disagrees with it. The
+   * cross-check was reachable-but-optional for one draft of this, and an optional
+   * argument at the one call site that matters is the same fail-open shape as the
+   * count it is guarding.
+   */
+  create(taskId: string, mode: SessionMode, count: CheckpointCount, now: number): SessionRecord {
     this.#seq += 1
     const record: SessionRecord = {
       id: `s${this.#seq}`,
       taskId,
       mode,
       rung: 1,
-      checkpointTotal,
+      checkpointTotal: count.total,
+      missingDeclared: count.missingDeclared,
       startedAt: now,
       phase: 'active',
     }

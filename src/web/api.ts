@@ -111,6 +111,20 @@ export interface GradeReportView {
   /** The grader emitted fewer distinct ids than the script declares. */
   incomplete: boolean
   /**
+   * `expectedTotal` is contradicted by the grade script's own `# baseline-fail:`
+   * and `# unprobed-invariant:` headers, which name ids the counter never saw. So
+   * the number this run was scored against is deflated, and `incomplete` cannot
+   * see it — a deflated count makes every other signal on this report read clean.
+   * Required, not optional: the server sends it on every report.
+   */
+  countDisputed: boolean
+  /**
+   * Which declared ids the counter missed, masked like `checkpoints`. For the
+   * grader's author reading the JSON; the rail renders no ids here, because a
+   * student cannot act on one.
+   */
+  disputedIds?: string[]
+  /**
    * Final. `reportFor` already computes this as `allPassed(v) && !incomplete`,
    * so re-ANDing `!incomplete` here would state a false thing about the contract
    * and leave the next person to change one side with a double negation.

@@ -2,10 +2,13 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  checkpointCount,
   countCheckpoints,
   maxRungFor,
   reportFor,
+  reportSuspect,
   SessionStore,
+  type CheckpointCount,
 } from '../../src/server/session.ts'
 import type { GradeResult } from '../../src/engine/grading/grader.ts'
 import { parseVerdict } from '../../src/engine/grading/verdict.ts'
@@ -53,6 +56,15 @@ function result(over: Partial<GradeResult> = {}): GradeResult {
     ].join('\n'),
   )
   return { verdictA, regressions: [], rebooted: false, ...over }
+}
+
+/**
+ * A `CheckpointCount` for tests that only care about the total. `create` takes
+ * the whole cross-check rather than a bare number on purpose, so this states the
+ * agreeing case explicitly instead of letting a default hide it.
+ */
+function count(total: number, missingDeclared: string[] = []): CheckpointCount {
+  return { total, missingDeclared, crossChecked: true }
 }
 
 describe('countCheckpoints', () => {
@@ -468,6 +480,78 @@ describe('countCheckpoints', () => {
   })
 })
 
+/** The real grader the deflation was measured on: 8 emitted ids, all 8 declared. */
+async function grader019(): Promise<string> {
+  return await readFile(
+    fileURLToPath(new URL('../../content/tasks/selinux/019-httpd-alt-port/grade.sh', import.meta.url)),
+    'utf8',
+  )
+}
+
+/**
+ * The measured defect, built the way it actually happens rather than by
+ * hand-writing a wrong total: one unterminated heredoc *after* the first `ck`, so
+ * the lexer reads every remaining line as body text. Nothing else about the
+ * grader changes — its headers still declare all eight ids — which is exactly why
+ * the second witness can see this and the first cannot.
+ */
+function deflate(script: string): string {
+  const lines = script.split('\n')
+  const first = lines.findIndex((l) => /^ck /.test(l))
+  expect(first).toBeGreaterThan(-1)
+  lines.splice(first + 1, 0, 'cat <<NOPE')
+  return lines.join('\n')
+}
+
+describe('checkpointCount', () => {
+  it('agrees with the grader headers on a grader that is not broken', async () => {
+    const c = checkpointCount(await grader019())
+    expect(c.total).toBe(8)
+    expect(c.missingDeclared).toEqual([])
+    expect(c.crossChecked).toBe(true)
+  })
+
+  it('catches a partially deflated count, which every count comparison reads as clean', async () => {
+    // The whole finding in one assertion. The lexer stops after the first `ck`,
+    // so `total` is 1 where the honest answer is 8 - and a run that emits one
+    // passing checkpoint then satisfies every existing guard at once:
+    // `status.size < expectedTotal` is false, `status.size > expectedTotal` is
+    // false, `allPassed` is true. Collapse to 0 is the only member of this class
+    // anything else catches, and this is not that case.
+    const c = checkpointCount(deflate(await grader019()))
+    expect(c.total).toBe(1)
+    expect(c.missingDeclared).toEqual([
+      'context-now',
+      'context-permanent',
+      'firewall-permanent',
+      'firewall-runtime',
+      'page-served',
+      'port-labeled',
+      'selinux-enforcing',
+    ])
+    expect(c.crossChecked).toBe(true)
+  })
+
+  it('reports no cross-check rather than suspicion when the grader declares nothing', () => {
+    // A grader may legitimately carry no headers. Treating absence as evidence
+    // would withhold a verdict from a correct run over a terse grade script,
+    // which is the false-fail direction this guard exists to avoid creating.
+    const c = checkpointCount('ck one "d" $?\nck two "d" $?\n')
+    expect(c.total).toBe(2)
+    expect(c.missingDeclared).toEqual([])
+    expect(c.crossChecked).toBe(false)
+  })
+
+  it('folds a malformed header into absent rather than into disagreement', () => {
+    // `# baseline-fail:` with nothing after it is a lint problem, not a missing
+    // checkpoint. A cross-check that reports what it cannot substantiate produces
+    // a false fail; `rhcsa lint` is the loud half of this pair.
+    const c = checkpointCount('# baseline-fail:\nck one "d" $?\n')
+    expect(c.total).toBe(1)
+    expect(c.missingDeclared).toEqual([])
+  })
+})
+
 describe('maxRungFor', () => {
   it('gives guided mode the whole ladder', () => {
     // Guided mode is full disclosure by construction, so every rung is open
@@ -654,13 +738,72 @@ describe('reportFor', () => {
     expect(r.expectedTotal).toBe(2)
     expect(r.allPassed).toBe(true)
   })
+
+  it('carries the count dispute onto the report as a field, not only into the log', () => {
+    // The arrivals *match* `expectedTotal` here, which is the point: a deflated
+    // count makes `incomplete` and the over-arrival warn both read clean, so
+    // `countDisputed` is the only thing on this report that knows anything is
+    // wrong. A `console.warn` reaches neither the rating path nor the client.
+    const full = parseVerdict('{"id":"lv-home-size","desc":"x","status":"pass"}')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const r = reportFor('practice', result({ verdictA: full }), false, 1, ['fs-home-size'])
+      expect(r.incomplete).toBe(false)
+      expect(r.total).toBe(r.expectedTotal)
+      expect(r.countDisputed).toBe(true)
+      // Not turned into a failure: the count is the suspect, not the machine, and
+      // trading a false pass for a false fail is not a fix.
+      expect(r.allPassed).toBe(true)
+      expect(r.disputedIds).toEqual(['fs-home-size'])
+      expect(warn).toHaveBeenCalledOnce()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('masks the disputed ids in exam mode, because an id is answer-key material', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const hidden = reportFor('exam', result(), false, 2, ['fs-home-size'])
+      expect(hidden.countDisputed).toBe(true)
+      expect(hidden.disputedIds).toBeUndefined()
+
+      const shown = reportFor('exam', result(), true, 2, ['fs-home-size'])
+      expect(shown.disputedIds).toEqual(['fs-home-size'])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('says nothing is disputed when no declared id is missing', () => {
+    const r = reportFor('practice', result(), false, 2)
+    expect(r.countDisputed).toBe(false)
+    expect(r.disputedIds).toBeUndefined()
+  })
+})
+
+describe('reportSuspect', () => {
+  const base = { passed: 2, total: 2, expectedTotal: 2, incomplete: false, countDisputed: false }
+  const rest = { allPassed: true, rebooted: true, regressionCount: 0 }
+
+  it('trusts a report whose three count signals all agree', () => {
+    expect(reportSuspect({ ...base, ...rest })).toBe(false)
+  })
+
+  it('distrusts each of the three independently', () => {
+    // Three separate doors, and a caller that guards two of them is a caller that
+    // writes a rating off an unscoreable run.
+    expect(reportSuspect({ ...base, ...rest, incomplete: true })).toBe(true)
+    expect(reportSuspect({ ...base, ...rest, countDisputed: true })).toBe(true)
+    expect(reportSuspect({ ...base, ...rest, total: 3 })).toBe(true)
+  })
 })
 
 describe('SessionStore', () => {
   it('issues sequential ids and starts every session at rung 1', () => {
     const s = new SessionStore()
-    const a = s.create('storage/014-grow-home-lv', 'practice', 5, 1000)
-    const b = s.create('users/006-team-provisioning', 'exam', 6, 1001)
+    const a = s.create('storage/014-grow-home-lv', 'practice', count(5), 1000)
+    const b = s.create('users/006-team-provisioning', 'exam', count(6), 1001)
 
     expect(a.id).toBe('s1')
     expect(b.id).toBe('s2')
@@ -673,14 +816,14 @@ describe('SessionStore', () => {
 
   it('advances the rung up to the mode cap and then refuses', () => {
     const s = new SessionStore()
-    const a = s.create('t', 'exam', 3, 0)
+    const a = s.create('t', 'exam', count(3), 0)
     expect(s.advanceRung(a.id).rung).toBe(2)
     expect(() => s.advanceRung(a.id)).toThrow(/maximum in exam mode/)
   })
 
   it('keeps the attempt active while grading and stores the latest result', () => {
     const s = new SessionStore()
-    const a = s.create('t', 'practice', 2, 1000)
+    const a = s.create('t', 'practice', count(2), 1000)
     s.record(a.id, result())
 
     expect(s.get(a.id)?.result).toBeDefined()
@@ -691,7 +834,7 @@ describe('SessionStore', () => {
 
   it('ends the attempt on finish and keeps the last result', () => {
     const s = new SessionStore()
-    const a = s.create('t', 'practice', 2, 1000)
+    const a = s.create('t', 'practice', count(2), 1000)
     s.record(a.id, result())
     const done = s.finish(a.id, 4000)
 

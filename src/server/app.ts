@@ -7,9 +7,10 @@ import type { GradeResult } from '../engine/grading/grader.ts'
 import type { TaskScripts } from '../engine/validate/harness.ts'
 import type { LabRuntime } from './lab.ts'
 import {
-  countCheckpoints,
+  checkpointCount,
   maxRungFor,
   reportFor,
+  reportSuspect,
   SessionStore,
   type SessionMode,
   type SessionRecord,
@@ -161,7 +162,30 @@ export function createApp(deps: AppDeps): Hono {
     // `ck` call today and a test pins that, because the number below is the
     // masked total the student is shown and an example `ck` added to the
     // library would inflate it for every task at once, silently.
-    const s = deps.sessions.create(task.id, mode, countCheckpoints(scripts.grade), deps.now())
+    const count = checkpointCount(scripts.grade)
+
+    // Zero is the one count that cannot be salvaged by withholding later. Every
+    // guard in `reportFor` is a comparison against this number, and at zero
+    // `incomplete` is `size < 0` — false for every possible run — so a grader
+    // whose whole body was swallowed reports a pass over an untouched machine.
+    // Refusing here is safe in the way refusing at grade time would not be: no
+    // work exists yet, so nothing is trapped and nothing is lost. It is also the
+    // only refusal in this fix — a *disputed* count still opens a session, because
+    // withholding the verdict costs the student nothing and refusing costs them the
+    // practice.
+    if (count.total === 0) {
+      return c.json(
+        {
+          error:
+            `${task.id}: its grade script declares no checkpoints, so a grading run could not be ` +
+            `scored against anything. Run \`npm run lint:content\` — a grader that counted 0 is a ` +
+            `broken grader, not an easy task.`,
+        },
+        500,
+      )
+    }
+
+    const s = deps.sessions.create(task.id, mode, count, deps.now())
     return c.json(
       {
         id: s.id,
@@ -287,7 +311,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({
       phase: s.phase,
       rung: s.rung,
-      ...reportFor(s.mode, result, false, s.checkpointTotal),
+      ...reportFor(s.mode, result, false, s.checkpointTotal, s.missingDeclared),
     })
   })
 
@@ -309,10 +333,24 @@ export function createApp(deps: AppDeps): Hono {
     const now = deps.now()
     deps.sessions.finish(s.id, now)
     const task = deps.bank.tasksById.get(s.taskId)
-    const report = reportFor(s.mode, result, true, s.checkpointTotal)
+    const report = reportFor(s.mode, result, true, s.checkpointTotal, s.missingDeclared)
 
+    // The rating is withheld on a report that cannot support a claim, in either
+    // direction. It used to be derived from `report.allPassed` with nothing
+    // consulted about whether the report was trustworthy — and `anyPassed` and
+    // `hadRegression` come off that same report, so guarding only the `passed`
+    // argument would still let a truncated or deflated run write a rating. The
+    // screen has withheld on these signals since Task 24; this is the half that
+    // did not, which meant the rail and the rating could contradict each other off
+    // one report.
+    //
+    // `null` is already the shape guided mode produces and the client already
+    // renders it as "no rating", so withholding needs no new state anywhere. What
+    // it must never do is withhold the **exit**: `/finish` has already ended the
+    // attempt above, and it still answers 200 with the report, so the session
+    // closes either way. A student must always be able to finish.
     let rating: Rating | null = null
-    if (s.mode !== 'guided') {
+    if (s.mode !== 'guided' && !reportSuspect(report)) {
       rating = deriveRating({
         rungUsed: s.rung,
         passed: report.allPassed,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../src/server/app.ts'
 import { SessionStore } from '../../src/server/session.ts'
 import type { LabRuntime } from '../../src/server/lab.ts'
@@ -70,6 +70,27 @@ const SCRIPTS: TaskScripts = {
   fixtures: [
     { kind: 'solution', name: '01.sh', script: 'sudo lvextend -L 12G /dev/rhel/home\n' },
   ],
+}
+
+/**
+ * The same grader with one unterminated heredoc after the first `ck`, which is
+ * how the deflation was measured on the real 019 grader. The lexer stops there
+ * and counts 1; the `# baseline-fail:` header still names both ids, so the second
+ * witness is what notices. Written as a heredoc fail-open rather than as a
+ * hand-set total so the real counter is what produces the wrong number.
+ */
+const DEFLATED = '# baseline-fail: lv-home-size, fs-home-size\nck lv-home-size "d" $?\ncat <<NOPE\nck fs-home-size "e" $?\n'
+
+/** The undeflated control: one checkpoint, declared, and the two witnesses agree. */
+const HONEST_ONE = '# baseline-fail: lv-home-size\nck lv-home-size "d" $?\n'
+
+/** A run in which the only checkpoint that arrived passed. */
+const ONE_PASS: Partial<LabRuntime> = {
+  gradeTask: async () => ({
+    verdictA: parseVerdict('{"id":"lv-home-size","desc":"d","status":"pass"}'),
+    regressions: [],
+    rebooted: false,
+  }),
 }
 
 function bank(): Bank {
@@ -200,7 +221,7 @@ function runtime(over: Partial<LabRuntime> = {}) {
   return { rt, calls }
 }
 
-function app(over: Partial<LabRuntime> = {}, now?: () => number) {
+function app(over: Partial<LabRuntime> = {}, now?: () => number, scripts: TaskScripts = SCRIPTS) {
   const { rt, calls } = runtime(over)
   let clock = 1000
   const sessions = new SessionStore()
@@ -209,7 +230,7 @@ function app(over: Partial<LabRuntime> = {}, now?: () => number) {
     runtime: rt,
     sessions,
     assertLib: '',
-    loadScripts: async () => SCRIPTS,
+    loadScripts: async () => scripts,
     now: now ?? (() => (clock += 1000)),
   })
   return { a, calls, sessions }
@@ -363,6 +384,39 @@ describe('POST /api/sessions', () => {
     })
     expect(res.status).toBe(500)
     expect(str(await res.json(), 'error')).toMatch(/no free extents/)
+  })
+
+  it('refuses to open a session whose grade script counts no checkpoints at all', async () => {
+    // At zero, every guard in `reportFor` is a comparison against zero:
+    // `incomplete` is `size < 0`, false for every possible run, so a grader whose
+    // whole body was swallowed reports a pass over an untouched machine. Nothing
+    // downstream can withhold its way out of that, and refusing here is safe in
+    // the way refusing at grade time would not be - no work exists yet.
+    const { a } = app({}, undefined, { ...SCRIPTS, grade: 'echo no checkpoints here\n' })
+    const res = await a.request('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: TASK.id, mode: 'practice' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    expect(res.status).toBe(500)
+    const error = str(await res.json(), 'error')
+    expect(error).toContain(TASK.id)
+    expect(error).toMatch(/lint:content/)
+  })
+
+  it('still opens a session when the count is merely disputed, because withholding is enough', async () => {
+    // The one refusal in this fix is zero. A deflated count still opens: the
+    // verdict and the rating are withheld later, which costs the student nothing,
+    // while refusing costs them the practice.
+    const { a } = app({}, undefined, { ...SCRIPTS, grade: DEFLATED })
+    const res = await a.request('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: TASK.id, mode: 'practice' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    expect(res.status).toBe(201)
+    // And the deflated number is what it reports, because that is what it has.
+    expect(at(await res.json(), 'checkpointTotal')).toBe(1)
   })
 })
 
@@ -633,6 +687,68 @@ describe('grading and finishing', () => {
     const scored = await retried.json()
     expect(num(scored, 'startedAt')).toBe(1_200_000)
     expect(at(scored, 'rating')).toBe('easy')
+  })
+
+  it('withholds the rating on a deflated count while still letting the session close', async () => {
+    // The whole of F1 and F2 end to end, with a control beside it so the test
+    // cannot pass by withholding everything.
+    //
+    // The honest arm: one declared checkpoint, one arrival, it passed, rung 1, 20
+    // minutes against a 10-minute budget - deriveRating calls that 'good'.
+    const honest = app(ONE_PASS, clockOf([0, 1_200_000]), { ...SCRIPTS, grade: HONEST_ONE })
+    const hid = await start(honest.a, 'exam')
+    await honest.a.request(`/api/sessions/${hid}/grade`, { method: 'POST' })
+    const scored = await (
+      await honest.a.request(`/api/sessions/${hid}/finish`, { method: 'POST' })
+    ).json()
+    expect(at(scored, 'report', 'countDisputed')).toBe(false)
+    expect(at(scored, 'rating')).toBe('good')
+
+    // The deflated arm: identical run, identical arrivals, and the count is wrong.
+    // Every pre-existing signal reads clean - `incomplete` is false because 1 is
+    // not less than 1, nothing over-arrived, and `allPassed` is true - which is
+    // exactly why the rating used to be written anyway.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { a } = app(ONE_PASS, clockOf([0, 1_200_000]), { ...SCRIPTS, grade: DEFLATED })
+      const id = await start(a, 'exam')
+      const graded = await (await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })).json()
+      expect(at(graded, 'incomplete')).toBe(false)
+      expect(num(graded, 'total')).toBe(num(graded, 'expectedTotal'))
+      expect(at(graded, 'allPassed')).toBe(true)
+      // The disagreement reaches the client as a field. A console.warn reaches
+      // neither the client nor the rating path, which is half of why this got out.
+      expect(at(graded, 'countDisputed')).toBe(true)
+
+      const res = await a.request(`/api/sessions/${id}/finish`, { method: 'POST' })
+      // Never withhold the exit: the attempt is over and the session is closable.
+      expect(res.status).toBe(200)
+      const done = await res.json()
+      expect(at(done, 'phase')).toBe('graded')
+      expect(at(done, 'report', 'countDisputed')).toBe(true)
+      // Withheld, not failed. `null` is the shape guided mode already produces.
+      expect(at(done, 'rating')).toBeNull()
+      // Revealed on finish, because the grader's author is who can act on it.
+      expect(items(done, 'report', 'disputedIds')).toEqual(['fs-home-size'])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('masks the disputed ids while the attempt is still running in exam mode', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { a } = app(ONE_PASS, undefined, { ...SCRIPTS, grade: DEFLATED })
+      const id = await start(a, 'exam')
+      const graded = await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })
+      const body = await graded.json()
+      expect(at(body, 'countDisputed')).toBe(true)
+      expectMissing(body, 'disputedIds')
+      // The serialised body, not a parsed field: a leaked id is a leaked id.
+      expect(JSON.stringify(body)).not.toContain('fs-home-size')
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('409s on finish before anything was graded', async () => {

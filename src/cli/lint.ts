@@ -3,7 +3,7 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, relative, sep } from 'node:path'
 import { loadBank, type Bank } from '../engine/content/bank.ts'
 import { ContentError } from '../engine/content/errors.ts'
-import { parseExpectations } from '../engine/validate/expectations.ts'
+import { parseDeclaredIds, parseUnprobed } from '../engine/validate/expectations.ts'
 import { MIN_ANTISOLUTIONS, MIN_SOLUTIONS } from '../engine/validate/harness.ts'
 import { checkpointIds } from '../server/session.ts'
 
@@ -106,54 +106,6 @@ const KEBAB_ID = /^[a-z0-9][a-z0-9-]*$/
 const CK_ID_WORD =
   /(?:^|[;&|{()])[ \t]*(?:(?:then|do|else)[ \t]+)?ck(?:_pass|_fail|_skip)?[ \t]+(["']?)([^ \t;&|()]*)/g
 
-/** `# unprobed-invariant:` is optional, so it gets its own parser rather than `parseExpectations`, which throws when its header is absent. */
-function unprobedRe(flags: string): RegExp {
-  return new RegExp('^#[ \\t]*unprobed-invariant:(.*)$', flags)
-}
-
-interface ParsedHeader {
-  /** Bare ids. This is the only form that may be compared against emitted ids. */
-  ids: string[]
-  /** `id@phase` for the inventory. Same ids, same order, phase retained. */
-  declared: string[]
-  problems: string[]
-}
-
-/**
- * Read `# unprobed-invariant:`, which declares checkpoints the grader emits but
- * knowingly does not probe. Absent is legal and means "none". A duplicate is
- * reported for the same reason `parseExpectations` reports one: a second header
- * line silently loses the first declaration.
- */
-function parseUnprobed(script: string): ParsedHeader {
-  const matches = script.match(unprobedRe('gim'))
-  if (matches === null || matches.length === 0) return { ids: [], declared: [], problems: [] }
-  if (matches.length > 1) {
-    return { ids: [], declared: [], problems: ['more than one "# unprobed-invariant:" header found'] }
-  }
-
-  const body = (unprobedRe('im').exec(script)?.[1] ?? '').trim()
-  if (body === '') {
-    return { ids: [], declared: [], problems: ['"# unprobed-invariant:" must name at least one checkpoint id'] }
-  }
-
-  const ids: string[] = []
-  const problems: string[] = []
-  const seen = new Set<string>()
-  for (const raw of body.split(',')) {
-    const id = raw.trim()
-    if (id === '') continue
-    if (seen.has(id)) {
-      problems.push(`checkpoint declared twice: ${id}`)
-      continue
-    }
-    seen.add(id)
-    ids.push(id)
-  }
-  // No phase grammar on this header, so `declared` is the bare ids.
-  return { ids, declared: [...ids], problems }
-}
-
 /**
  * `ck` calls whose id is not a literal — `ck "$id"`, `ck ${name}`, `ck "size-$n"`.
  *
@@ -237,21 +189,6 @@ async function shellScripts(dir: string): Promise<string[]> {
     else if (entry.isFile() && entry.name.endsWith('.sh')) out.push(full)
   }
   return out
-}
-
-/** `parseExpectations` throws an aggregating ContentError; lint collects instead of stopping at the first bad file. */
-function declaredIds(script: string, where: string, header: 'expect-fail' | 'baseline-fail'): ParsedHeader {
-  try {
-    const decl = parseExpectations(script, where, header)
-    return {
-      ids: decl.map((d) => d.id),
-      declared: decl.map((d) => `${d.id}@${d.phase}`),
-      problems: [],
-    }
-  } catch (e) {
-    if (e instanceof ContentError) return { ids: [], declared: [], problems: e.problems }
-    throw e
-  }
 }
 
 function checkDeclaredAreEmitted(
@@ -583,7 +520,7 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
     const script = text.get(grader) ?? ''
     const emitted = emittedByTask.get(taskDirOf(grader)) ?? new Set<string>()
 
-    const baseline = declaredIds(script, where, 'baseline-fail')
+    const baseline = parseDeclaredIds(script, where, 'baseline-fail')
     for (const p of baseline.problems) problems.push(`${where}: ${p}`)
     checkDeclaredAreEmitted(baseline.ids, emitted, 'baseline-fail', where, problems)
 
@@ -638,7 +575,7 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
     // <root>/tasks/<area>/<task>/antisolutions/NN-x.sh -> <root>/tasks/<area>/<task>
     const emitted = emittedByTask.get(dirname(dirname(file)))
 
-    const expected = declaredIds(script, where, 'expect-fail')
+    const expected = parseDeclaredIds(script, where, 'expect-fail')
     for (const p of expected.problems) problems.push(`${where}: ${p}`)
 
     if (emitted === undefined) {
