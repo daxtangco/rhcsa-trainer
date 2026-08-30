@@ -1,0 +1,28 @@
+id: systemd/017-boot-time-service
+title: Run a script at every boot
+chapter: 11
+scope: exam-objective
+rhel: 9
+objectives:
+  - systemd.services.enable
+  - boot.targets.default
+requires_concepts:
+  - systemd.enabled-vs-started
+  - systemd.unit-file-anatomy
+difficulty: 3
+time_budget: 600
+weight: medium
+editions: [r9, r10]
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  /usr/local/bin/rhcsa-stamp already exists and works: it writes a file to
+  /run when it runs.
+
+  - Create a systemd service named rhcsa-stamp.service that runs it once at
+    every boot.
+  - The service must start automatically. Nobody is going to run it by hand.
+  - Make sure the system boots to a text login, not a graphical one.
+
+  Leave sshd alone.

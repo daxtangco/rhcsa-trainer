@@ -1,0 +1,32 @@
+id: users/006-team-provisioning
+title: Provision the devops team
+chapter: 6
+scope: exam-objective
+rhel: 9
+objectives:
+  - users.accounts.manage
+  - users.groups.manage
+  - users.passwords.aging
+  - users.sudo.superuser
+requires_concepts:
+  - users.shadow-aging-fields
+  - users.sudoers-and-wheel
+difficulty: 2
+time_budget: 600
+weight: high
+editions: [r9, r10]
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  Three people are joining the devops team.
+
+  - Create a group named devops with GID 5000.
+  - Create users alice and bob. Both must be members of devops in
+    addition to their own primary groups.
+  - Create a user carol whose account expires on 2027-06-30 and who is a
+    member of devops.
+  - alice must be forced to change her password at least every 30 days.
+  - Every member of devops must be able to run any command with sudo.
+
+  Do not change anything about the student account.

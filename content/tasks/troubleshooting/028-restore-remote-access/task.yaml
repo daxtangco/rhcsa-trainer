@@ -1,0 +1,32 @@
+id: troubleshooting/028-restore-remote-access
+title: Nobody can SSH to this machine
+chapter: 26
+scope: exam-objective
+rhel: 9
+objectives:
+  - net.services.status
+  - net.firewall.settings
+  - net.services.autostart
+  - systemd.services.enable
+requires_concepts:
+  - systemd.enabled-vs-started
+  - net.firewalld-runtime-vs-permanent
+  - net.nm-connections-are-the-config
+difficulty: 4
+time_budget: 900
+weight: high
+editions: [r9, r10]
+reboot_check: true
+requires_disks: 0
+transport: vmrun
+prompt: |
+  This machine has stopped accepting SSH connections and you are at the
+  console. Somebody changed three things.
+
+  Restore remote access so that it works now and after a reboot:
+
+  - sshd must be running and must start at boot.
+  - The firewall must allow ssh, permanently.
+  - The machine's network connection must come up on its own at boot.
+
+  Find the three problems yourself. Do not reinstall anything.

@@ -1,0 +1,33 @@
+id: selinux/019-httpd-alt-port
+title: Serve a directory on a non-standard port
+chapter: 22
+scope: instrumental
+rhel: 9
+objectives:
+  - selinux.contexts.restore
+  - selinux.ports.labels
+  - net.firewall.settings
+  - pkg.dnf.install
+requires_concepts:
+  - selinux.labels-now-vs-policy
+  - selinux.ports-are-labeled-too
+  - net.firewalld-runtime-vs-permanent
+difficulty: 4
+time_budget: 900
+weight: high
+editions: [r9, r10]
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  The directory /srv/web already contains an index.html. Publish it with
+  Apache on TCP port 82.
+
+  - Install and run the httpd service, and make sure it comes back after a
+    reboot.
+  - Apache must serve /srv/web, not the default document root.
+  - The labelling must be correct in a way that survives a full relabel of
+    the filesystem, not just until the next one.
+  - Port 82/tcp must be reachable from other machines, permanently.
+
+  Leave SELinux in enforcing mode.
