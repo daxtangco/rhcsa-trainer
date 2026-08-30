@@ -8,6 +8,7 @@ import { validateBank } from '../engine/validate/run.ts'
 import { loadVmConfig } from '../engine/vm/config.ts'
 import { chooseTransport } from '../engine/vm/select.ts'
 import { VmController } from '../engine/vm/vmrun.ts'
+import { lintContent } from './lint.ts'
 
 export interface CliIo {
   out: (line: string) => void
@@ -18,6 +19,7 @@ const USAGE = `usage: rhcsa <command> [options]
 
 commands:
   coverage              report content coverage gaps
+  lint                  static checks on grader headers and checkpoint ids (no VM)
   validate [task-id]    run every fixture of every task against the lab VM
 
 options:
@@ -108,6 +110,75 @@ async function coverage(argv: string[], io: CliIo): Promise<number> {
     }
   }
 
+  return 0
+}
+
+/**
+ * `lint` takes `--content` and nothing else. Same discipline as the other two
+ * parsers, and `--strict` is deliberately not accepted: every problem this
+ * command reports is already an error, so a flag that turned some of them into
+ * errors would imply the rest were optional.
+ */
+function parseLintArgs(argv: string[]): { root: string } | undefined {
+  let root = 'content'
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--content') {
+      const value = argv[i + 1]
+      if (value === undefined || value === '' || value.startsWith('--')) return undefined
+      root = value
+      i++
+    } else {
+      return undefined
+    }
+  }
+
+  return { root }
+}
+
+async function lint(argv: string[], io: CliIo): Promise<number> {
+  const options = parseLintArgs(argv)
+  if (options === undefined) {
+    io.err(USAGE)
+    return 2
+  }
+
+  let result: Awaited<ReturnType<typeof lintContent>>
+  try {
+    result = await lintContent(options.root)
+  } catch (e) {
+    // A missing or unreadable content root is a usage-shaped failure, not a
+    // crash: `lint` is the one command that runs on a fresh checkout, so its
+    // error for "there is no content here" has to be readable.
+    io.err(e instanceof Error ? e.message : String(e))
+    return 1
+  }
+
+  io.out(`content root: ${options.root}`)
+  io.out(`graders checked: ${result.gradersChecked}`)
+  io.out(`scripts with headers: ${result.inventory.length}`)
+
+  // The inventory is printed, not just computed. A drift check needs two commits
+  // and a committed checker has only one, so the drift check is
+  // test/cli/content-headers-golden.test.ts locking this structure against a
+  // fixture — and printing it is what lets a reader confirm the fixture by eye.
+  for (const entry of result.inventory) {
+    io.out(`\n${entry.file}`)
+    for (const h of entry.headers) io.out(`  ${h.kind}: ${h.ids.join(', ')}`)
+    if (entry.emitted.length > 0) io.out(`  emits: ${entry.emitted.join(', ')}`)
+  }
+
+  if (result.notes.length > 0) io.out('')
+  for (const n of result.notes) io.out(`note: ${n}`)
+
+  if (result.problems.length > 0) {
+    for (const p of result.problems) io.err(`problem: ${p}`)
+    io.err(`\n${result.problems.length} problem(s)`)
+    return 1
+  }
+
+  io.out(`\nno problems in ${result.gradersChecked} grader(s)`)
   return 0
 }
 
@@ -222,6 +293,8 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
   switch (command) {
     case 'coverage':
       return await coverage(rest, io)
+    case 'lint':
+      return await lint(rest, io)
     case 'validate':
       return await validate(rest, io)
     default:

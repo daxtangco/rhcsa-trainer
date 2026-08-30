@@ -1,0 +1,354 @@
+[
+  {
+    "file": "tasks/selinux/019-httpd-alt-port/antisolutions/01-chcon-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "context-permanent"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/019-httpd-alt-port/antisolutions/02-runtime-firewall-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "firewall-permanent",
+          "firewall-runtime"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/019-httpd-alt-port/antisolutions/03-forgot-port-label.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "page-served",
+          "port-labeled"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/019-httpd-alt-port/antisolutions/04-started-not-enabled.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "httpd-enabled",
+          "page-served"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/019-httpd-alt-port/antisolutions/05-fcontext-without-restorecon.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "context-now",
+          "page-served"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/019-httpd-alt-port/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "ids": [
+          "context-now",
+          "context-permanent",
+          "firewall-permanent",
+          "firewall-runtime",
+          "httpd-enabled",
+          "page-served",
+          "port-labeled"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "ids": [
+          "selinux-enforcing"
+        ]
+      }
+    ],
+    "emitted": [
+      "context-now",
+      "context-permanent",
+      "firewall-permanent",
+      "firewall-runtime",
+      "httpd-enabled",
+      "page-served",
+      "port-labeled",
+      "selinux-enforcing"
+    ]
+  },
+  {
+    "file": "tasks/storage/014-grow-home-lv/antisolutions/01-forgot-growfs.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "fs-home-size"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/014-grow-home-lv/antisolutions/02-removed-persistence.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "fs-home-size",
+          "home-from-lv",
+          "persist-config"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/014-grow-home-lv/antisolutions/03-wrong-lv.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "fs-home-size",
+          "lv-home-size"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/014-grow-home-lv/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "ids": [
+          "fs-home-size",
+          "lv-home-size"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "ids": [
+          "var-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "fs-home-size",
+      "home-from-lv",
+      "lv-home-size",
+      "persist-config",
+      "var-intact"
+    ]
+  },
+  {
+    "file": "tasks/systemd/017-boot-time-service/antisolutions/01-started-not-enabled.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "stamp-effect",
+          "stamp-enabled"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/systemd/017-boot-time-service/antisolutions/02-faked-the-end-state.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "stamp-effect",
+          "stamp-enabled",
+          "unit-verifies"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/systemd/017-boot-time-service/antisolutions/03-broke-the-target.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "default-target"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/systemd/017-boot-time-service/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "ids": [
+          "stamp-effect",
+          "stamp-enabled",
+          "unit-verifies"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "ids": [
+          "sshd-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "default-target",
+      "sshd-intact",
+      "stamp-effect",
+      "stamp-enabled",
+      "unit-verifies"
+    ]
+  },
+  {
+    "file": "tasks/troubleshooting/028-restore-remote-access/antisolutions/01-started-not-enabled.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "sshd-enabled",
+          "sshd-listening"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/troubleshooting/028-restore-remote-access/antisolutions/02-runtime-firewall-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "firewall-ssh"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/troubleshooting/028-restore-remote-access/antisolutions/03-network-left-manual.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "net-autoconnect"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/troubleshooting/028-restore-remote-access/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "ids": [
+          "firewall-ssh",
+          "net-autoconnect",
+          "sshd-enabled",
+          "sshd-listening"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "ids": [
+          "student-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "firewall-ssh",
+      "net-autoconnect",
+      "sshd-enabled",
+      "sshd-listening",
+      "student-intact"
+    ]
+  },
+  {
+    "file": "tasks/users/006-team-provisioning/antisolutions/01-no-group-no-sudo.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "alice-in-devops",
+          "bob-in-devops",
+          "carol-in-devops",
+          "sudo-devops"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/users/006-team-provisioning/antisolutions/02-aging-skipped.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "ids": [
+          "alice-maxdays",
+          "carol-expiry",
+          "group-gid"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/users/006-team-provisioning/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "ids": [
+          "alice-in-devops",
+          "alice-maxdays",
+          "bob-in-devops",
+          "carol-expiry",
+          "carol-in-devops",
+          "group-gid",
+          "sudo-devops"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "ids": [
+          "student-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "alice-in-devops",
+      "alice-maxdays",
+      "bob-in-devops",
+      "carol-expiry",
+      "carol-in-devops",
+      "group-gid",
+      "student-intact",
+      "sudo-devops"
+    ]
+  }
+]
