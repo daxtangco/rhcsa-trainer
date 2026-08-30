@@ -1,4 +1,4 @@
-# R1 findings: can WSL2 reach a VMnet8 guest over TCP/22?
+# R1 findings: can WSL2 reach a VMnet8 guest over TCP/22? — INCONCLUSIVE
 
 **Verdict: INCONCLUSIVE.** Host-routing into the VMnet8 subnet passed cleanly
 (0% packet loss to the host adapter), but no guest could be reached at all —

@@ -135,11 +135,30 @@ say "ip route get $ip (shows which interface WSL uses to reach the guest):"
 ip route get "$ip" 2>&1 | sed 's/^/  /'
 
 hdr "ICMP"
-if ping -c 3 -W 2 "$ip" >/dev/null 2>&1; then
+# Keep the output, not just the exit status: an unclaimed address and a
+# claimed-but-silent one both fail this ping, but only the unclaimed one
+# leaves an ICMP error behind, and the TCP check below can't tell them
+# apart on its own.
+ping_out=$(ping -c 3 -W 2 "$ip" 2>&1)
+ping_rc=$?
+printf '%s\n' "$ping_out" | sed 's/^/  /'
+icmp_no_claim=no
+if printf '%s' "$ping_out" | grep -qE '\+[1-9][0-9]* errors|Destination (Host|Net) Unreachable'; then
+  icmp_no_claim=yes
+fi
+if [[ $ping_rc -eq 0 ]]; then
   say "ok: ping $ip"
+elif [[ $icmp_no_claim == yes ]]; then
+  say "ping got an ICMP error above (a '+N errors' count or a Destination"
+  say "Unreachable line) - nothing at $ip is claiming that address at all."
+  say "That's independent evidence the TCP check below can't produce on its"
+  say "own, and it outranks a silent TCP timeout: a spent ICMP error budget"
+  say "looks identical to a real firewall drop at the TCP layer."
 else
-  say "warn: ping failed. Not conclusive - Windows Firewall commonly drops"
-  say "      ICMP while still forwarding TCP. The port check below decides."
+  say "warn: ping showed plain packet loss with no ICMP error. Not conclusive"
+  say "      by itself - Windows Firewall commonly drops ICMP while still"
+  say "      forwarding TCP - but combined with a silent TCP timeout below,"
+  say "      this combination is the firewall signature."
 fi
 
 hdr "TCP/22"
@@ -159,9 +178,26 @@ if [[ $tcp_rc -eq 0 ]]; then
   reachable=yes
   tcp_outcome=open
 elif [[ $tcp_rc -eq 124 ]]; then
-  say "FAIL: the connection attempt to $ip:22 timed out with no error at all -"
-  say "      packets are being silently dropped. This is the firewall signature."
-  tcp_outcome=dropped
+  # A silent TCP timeout alone is ambiguous - it is produced both by a real
+  # firewall drop AND by an ordinary unclaimed address, because the Windows
+  # NAT/vswitch path rate-limits ICMP Destination-Unreachable replies and the
+  # ICMP check above (which runs first) already spent that address's budget.
+  # Do NOT "fix" this by retrying the connect: a retry only ever sees the
+  # already-spent budget, so it biases every result toward "dropped" - the
+  # wrong direction. ICMP's own evidence, captured above before the budget
+  # was spent, is what actually tells the two apart, so it outranks a silent
+  # TCP timeout here.
+  if [[ $icmp_no_claim == yes ]]; then
+    say "TCP/22 on $ip timed out silently, but ping's ICMP error (above) shows"
+    say "nothing claims $ip at all. That outranks the silent timeout: this is"
+    say "an unclaimed address, not evidence of a firewall."
+    tcp_outcome=unreachable
+  else
+    say "FAIL: the connection attempt to $ip:22 timed out with no error at all,"
+    say "      and ping showed plain loss with no ICMP error either - something"
+    say "      is there and swallowing packets. This is the firewall signature."
+    tcp_outcome=dropped
+  fi
 elif printf '%s' "$tcp_err" | grep -qi 'connection refused'; then
   say "$tcp_err" | sed 's/^/  /'
   say "TCP/22 on $ip was refused: routed, guest is up, but nothing is listening"
@@ -214,6 +250,10 @@ case "$tcp_outcome" in
     ;;
   *)
     say "R1 CONFIRMED AS A PROBLEM. Try these, in order of preference:"
+    say ""
+    say "0. Re-run this probe once more before changing anything. Confirming the"
+    say "   same result twice costs nothing and rules out a one-off blip before"
+    say "   you touch Windows Firewall."
     say ""
     say "1. Windows Firewall. The VMware NAT adapter may be classified as a"
     say "   Public network, which blocks inbound. In an elevated PowerShell:"
