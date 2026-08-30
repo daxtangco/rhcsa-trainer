@@ -199,6 +199,35 @@ function nonLiteralIds(script: string): string[] {
   return found
 }
 
+/**
+ * A line that only sets shell options: `set -e`, `set -euo pipefail`, `set +x`.
+ *
+ * Deliberately narrow. This decides what `changesNothing` is allowed to *ignore*,
+ * so widening it makes that rule fire more often — a false fail on the bank — while
+ * keeping it narrow only ever leaves a no-op fixture unreported. The `[-+]` covers
+ * both directions of an option and the trailing `pipefail` of `set -euo pipefail`
+ * needs no clause of its own, because the whole line is what matches.
+ */
+const SHELL_OPTION_LINE = /^set\s+[-+]/
+
+/**
+ * Whether a fixture body could not have changed the machine: nothing in it but
+ * comments, blank lines and shell options.
+ *
+ * Text-only, no execution, no guest. It is deliberately not a general "is this a
+ * no-op" question — a command that runs and happens to be a no-op *on this machine*
+ * is a runtime comparison against the baseline, which lives in `runFixture` and not
+ * here. This is only the case where there is no command at all.
+ */
+function changesNothing(script: string): boolean {
+  for (const raw of script.split('\n')) {
+    const line = raw.trim()
+    if (line === '' || line.startsWith('#') || SHELL_OPTION_LINE.test(line)) continue
+    return false
+  }
+  return true
+}
+
 /** Every `.sh` under `dir`, recursively. Sorted by the caller, because readdir order is not guaranteed. */
 async function shellScripts(dir: string): Promise<string[]> {
   const out: string[] = []
@@ -465,8 +494,10 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
   // whole point of them.
   //
   // `graders.length` is a **walk result**. `bank.tasks` is the independent record of
-  // what should exist, and it is the only input every rule in `checkFixtureFloors`
-  // reads. So the grader count is not a precondition of the floors — it is one of
+  // what should exist, and it is the one input every rule in `checkFixtureFloors` has
+  // **in common** — not the only input any of them reads: `graders` is a second one,
+  // read by the `grade.sh` rule and iterated by the orphan reconciliation at the end.
+  // So the grader count is not a precondition of the floors — it is one of
   // the things they check, via the `grade.sh` rule. Gating them on it inverted that:
   // a bank still declaring five tasks with every `grade.sh` deleted found zero
   // graders, so the rule that exists to report exactly that never ran. Under
@@ -485,16 +516,57 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
     // "The floors could not be checked" is itself a problem, for the same reason as
     // the guard above: a gate exiting 0 having skipped its checks.
     //
-    // Reported only when the walk found a grader, and that condition is about the
-    // *message*, not about the rules. At zero graders the guard above already
-    // carries the single actionable line — and when `--allow-empty` says an
-    // unauthored root is expected, an unloadable bank is that assertion being true
-    // rather than a defect. With a grader present the bank is a real bank, so a bank
-    // that will not load is a problem no flag suppresses.
+    // This condition is about the **message**, not about the rules. The rules ran
+    // unconditionally above and nothing here can suppress them; all that is decided
+    // here is whether the loader's failure earns a line. It does if the walk found a
+    // grader **or** there is a regular file at `<root>/objectives.yaml`.
+    //
+    // `objectives.yaml` is the discriminator because it is the bank's root manifest —
+    // its presence is what separates *"nobody authored a bank here"* from *"a bank is
+    // here and would not load"*. `--allow-empty` cannot make that distinction, because
+    // it does not assert that the root is unauthored. It asserts **zero graders**, and
+    // its own message forty lines above says exactly that: "pass --allow-empty if an
+    // empty bank is genuinely expected" — an empty *bank*, meaning no `grade.sh`. It
+    // says nothing about `objectives.yaml`, `concepts/` or `task.yaml`.
+    //
+    // **The named path is load-bearing. Do not "strengthen" it into a walk.**
+    // *"There is no file at this fixed path"* is a filesystem fact. *"The walk found
+    // no `task.yaml`"* is a precondition computed from the very thing being validated,
+    // which is this file's recurring defect one artifact along. The two read almost
+    // identically in English and are not the same check. `files.length > 0` is not a
+    // substitute either — `emptyRoot()` in `test/cli/lint.test.ts` contains a
+    // `setup.sh` and no bank file, and must keep exiting 0.
+    //
+    // **The residual, which this does narrow rather than close.** Zero graders *and*
+    // no regular file at that path still suppresses the message, so the command exits
+    // 0 with empty stderr. Measured: that covers an authored root — five `task.yaml`,
+    // five `setup.sh`, `concepts/` intact — whose `objectives.yaml` was **deleted**,
+    // and the same root with a directory or a broken symlink at that path. (A present
+    // but unreadable `objectives.yaml` does report: `stat` succeeds, so `isFile` is
+    // true.) Closing that needs an independent record that a bank was meant to exist
+    // here, and the only candidate inside this command is a walk — the shape ruled out
+    // in the paragraph above. So the channel is narrowed from "any loader failure" to
+    // "the discriminator is itself the thing that is missing", and no further.
+    //
+    // Two earlier versions of this comment were wrong. Both are recorded rather than
+    // deleted, because both are what the next reader will reach for:
+    //   1. "a root the walk found no graders in has no task to iterate" — false: it
+    //      infers a property of the bank from a result of the walk.
+    //   2. "when `--allow-empty` says an unauthored root is expected, an unloadable
+    //      bank is that assertion being true rather than a defect" — false twice over.
+    //      The flag says zero graders, not unauthored; and inferring a property of the
+    //      *content* from a failure of the *loader* is (1) one artifact along.
+    // Both defended reporting nothing at zero graders. Measured against (2): a bank
+    // declaring five tasks with every `grade.sh` deleted plus one ordinary YAML typo
+    // exited 0, 0 problems, stderr 0 bytes, under `--allow-empty` — the same channel
+    // the unconditional floors above were written to close.
+    //
+    // With a grader present the bank is a real bank either way, so a bank that will
+    // not load is a problem no flag suppresses.
     //
     // The header checks below still run either way, which is the split documented on
     // `taskDirOf`: a YAML error must not take the script lint down with it.
-    if (graders.length > 0) {
+    if (graders.length > 0 || (await isFile(join(root, 'objectives.yaml')))) {
       const detail =
         e instanceof ContentError ? e.problems.join('; ') : e instanceof Error ? e.message : String(e)
       problems.push(`${root}: the bank did not load, so the per-task fixture floors were not checked — ${detail}`)
@@ -573,6 +645,34 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
       problems.push(`${where}: no sibling grade.sh, so its "# expect-fail:" ids cannot be checked`)
     } else {
       checkDeclaredAreEmitted(expected.ids, emitted, 'expect-fail', where, problems)
+    }
+
+    // An anti-solution exists to prove the grader **detects** a specific wrong answer.
+    // `runFixture` in `src/engine/validate/harness.ts` resets, runs `setup.sh`, runs
+    // the fixture, grades, and compares the verdict against the `# expect-fail:` ids
+    // above — and nothing anywhere establishes that applying the fixture changed the
+    // machine. At the unsolved baseline the goal checkpoints already fail, which is
+    // exactly what the header declares, so a fixture that does nothing is certified as
+    // a working detector. It is green because the task is unsolved, not because the
+    // grader caught anything: a false green on the bank.
+    //
+    // This is the natural shape of a half-written anti-solution rather than an exotic
+    // one. `# expect-fail:` is **itself a comment**, so the authoring order every
+    // fixture in this bank follows — shebang, explanatory paragraph, header,
+    // `set -euo pipefail`, then the command — satisfies the header rule above one line
+    // before the fixture does anything. Bash then exits 0 having run nothing, and the
+    // exit-code check in `harness.ts` catches a fixture that *errors*, not one that
+    // succeeds at nothing.
+    //
+    // Solutions are out of scope on purpose: a solution that does nothing fails its
+    // own grader, which is loud. Only an anti-solution is graded against a prediction
+    // the baseline already satisfies.
+    if (changesNothing(script)) {
+      problems.push(
+        `${where}: nothing here but comments and shell options, so this anti-solution changes nothing. ` +
+          `Its "# expect-fail:" ids already fail at the unsolved baseline and no run compares against ` +
+          `that baseline, so a fixture that does nothing is certified as a working detector.`,
+      )
     }
 
     inventory.push({

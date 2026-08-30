@@ -209,6 +209,46 @@ describe('rhcsa lint fails on planted defects', () => {
     expect(r.err).not.toMatch(/"my".*is not lowercase/)
   })
 
+  it('catches an anti-solution whose body is only comments, so it detects nothing', async () => {
+    // An anti-solution exists to prove the grader detects a specific wrong answer, and
+    // nothing in `runFixture` establishes that applying it changed the machine. At the
+    // unsolved baseline the goal checkpoints already fail — exactly what the header
+    // declares — so a fixture that does nothing is certified as a working detector. It
+    // is green because the task is unsolved, not because the grader caught anything.
+    //
+    // This is the natural half-written shape, not an exotic one: `# expect-fail:` is
+    // itself a comment, so the authoring order every fixture in this bank follows —
+    // paragraph, header, `set -euo pipefail`, then the command — satisfies the header
+    // rule one line before the fixture does anything.
+    const root = await bankCopy()
+    const fixture = 'tasks/storage/014-grow-home-lv/antisolutions/01-forgot-growfs.sh'
+    await writeFile(
+      join(root, fixture),
+      [
+        '#!/usr/bin/env bash',
+        '# The paragraph and the header landed; the lvextend never did.',
+        '# expect-fail: fs-home-size',
+        'set -euo pipefail',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const r = await lint(root)
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/01-forgot-growfs\.sh: nothing here but comments and shell options/)
+    // The kill has to be attributable to *this* rule. Crediting one to an earlier
+    // assertion is a named defect class on this task, so the fixture is built to trip
+    // nothing else: the header is present and names an id the sibling grader really
+    // emits, so neither the missing-header throw nor `checkDeclaredAreEmitted` fires,
+    // and this file contributes exactly one problem.
+    expect(r.err).not.toMatch(/must declare a "# expect-fail:" header/)
+    expect(r.err).not.toMatch(/expect-fail names/)
+    expect(countProblems(r.err, /01-forgot-growfs\.sh/)).toBe(1)
+    // And the header was genuinely read rather than skipped past.
+    expect(r.out).toMatch(/^ {2}expect-fail: fs-home-size@both$/m)
+  })
+
   it('reports every problem in one pass rather than stopping at the first file', async () => {
     // Content authoring is a loop; one-error-per-run makes that loop slow. Same
     // reason ContentError aggregates.
@@ -581,11 +621,40 @@ describe('rhcsa lint runs the bank-derived rules whatever the walk found', () =>
     expect(r.code).toBe(0)
   })
 
+  it('reports a bank that will not load at zero graders, which is the flag\'s own use case', async () => {
+    // `--allow-empty` documents itself for the half-authored root, and this is what
+    // that actually looks like: `task.yaml` written first, with a YAML error in it,
+    // before `grade.sh` and `antisolutions/` exist. The flag asserts **zero graders**,
+    // not an unauthored root, so it must not swallow the loader's failure — and it did.
+    // Measured before this fix, on a root still declaring all five tasks: exit 0, 0
+    // problems, stderr 0 bytes. One ordinary YAML typo re-opened the exact channel the
+    // unconditional floors above were written to close.
+    const root = await strippedBank()
+    await writeFile(
+      join(root, 'tasks/storage/014-grow-home-lv/task.yaml'),
+      'id: [broken\n  title: nope\n',
+      'utf8',
+    )
+
+    const r = await lint(root, '--allow-empty')
+    expect(r.code).toBe(1)
+    expect(r.err).toMatch(/the bank did not load, so the per-task fixture floors were not checked/)
+    // The parse error itself, not merely "it failed": the operator needs the file and
+    // the position, and a message that only says the bank is bad is not actionable.
+    expect(r.err).toMatch(/task\.yaml: missed comma between flow collection entries/)
+    // The walk really did find nothing, so the message came from the named-path check
+    // and not from a grader being present.
+    expect(r.out).toMatch(/graders checked: 0/)
+  })
+
   it('does not let --allow-empty excuse a bank that will not load when graders exist', async () => {
-    // The narrow half of the message rule: at zero graders an unloadable bank is the
-    // flag's assertion being true, but with graders present the bank is a real bank
-    // and no flag suppresses its failure to load. Widening that is the obvious wrong
-    // turn, so it is pinned.
+    // The grader-present half of the message rule. This comment used to claim "at zero
+    // graders an unloadable bank is the flag's assertion being true" — false, and the
+    // test above is the other half: at zero graders it is reported too, whenever
+    // `objectives.yaml` is there to say somebody authored a bank. What is pinned here
+    // is that a grader present makes the bank real regardless, so no flag suppresses
+    // its failure to load. Widening the flag into a general mute is the obvious wrong
+    // turn.
     const root = await bankCopy()
     await writeFile(join(root, 'objectives.yaml'), 'this: [is not\n  valid: yaml\n', 'utf8')
 
