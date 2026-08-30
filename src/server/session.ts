@@ -55,67 +55,170 @@ export interface SessionRecord {
  * be the loud half. Measured: widening it moves none of the six counts the bank
  * pins (`assert.sh` 0; 019=8, 014=5, 017=5, 028=5, 006=8).
  *
- * Known misses. All of them under-count, which is the fail-*open* direction —
- * `expectedTotal` lands low, so `incomplete` under-fires — and none is used by
- * any grader in the bank (measured: 43 `ck` call sites across the five graders,
- * every one at column 0 or indented):
+ * A `ck` may also follow `then`, `do`, `else`, `{`, `(` or `)`. That group used
+ * to be a documented known-miss list, and the list was wrong twice: the second
+ * time because a `case` label is a **closing** paren, so
+ * `enabled) ck en-id "d" 0 ;;` counted 0 against bash's 1 and no reader gets
+ * that from "`(`" — while `case` is already the bank's idiom
+ * (`content/tasks/storage/014-grow-home-lv/grade.sh` and `assert.sh` each
+ * contain one). Widening the pattern is now verifiable in a way it was not when
+ * the list was written, because `test/server/checkpoint-oracle.ts` measures every
+ * one of these shapes against real bash. The asymmetry above decides the rest: a
+ * miss here is a silent fail-open, and an over-count from too wide a pattern is a
+ * false *fail*, which is loud.
  *
- * - a `ck` after `then`, `do`, `else`, `{` or `(` on the same line. Nothing in
- *   `content/` or `docs/` matches that shape and `assert.sh` documents only the
- *   comment form and the separator form, so this stays a disclosure.
- * - a `ck` whose id is produced by an arithmetic shift's neighbour:
- *   `want=$(( 1 << shift ))` opens a phantom heredoc, because the `<<` is not
- *   inside quotes and this scan does not track redirect position. Every line
- *   after it is discarded. No grader shifts (measured: the only `$((` uses are
- *   `/ 86400` and `1024 ** 2..4`), and the runtime warning in `reportFor` is
- *   what would surface it if one did.
- *
- * A **line continuation is not** in this list, though it was once claimed here:
+ * A **line continuation is not** a miss, though it was once claimed here:
  * measured, `test -f /x \` followed by `  && ck cont-id "d" $?` counts 1, and so
  * does a continued bare `ck` — the separator alternation and the leading-space
  * alternation each cover it.
  */
 const CK_CALL =
-  /(?:^[ \t]*|[;&|][ \t]*)ck(?:_pass|_fail|_skip)?[ \t]+["']?([A-Za-z0-9_][A-Za-z0-9_-]*)/g
+  /(?:^|[;&|{()])[ \t]*(?:(?:then|do|else)[ \t]+)?ck(?:_pass|_fail|_skip)?[ \t]+["']?([A-Za-z0-9_][A-Za-z0-9_-]*)/g
 
 /**
  * `<<EOF`, `<<-EOF` or `<<'EOF'`, **anchored** — it is matched against the slice
  * that starts at a `<<`, never against the whole line. Unanchored, it was the
  * same defect F8 fixed in `content.ts`: `echo "a << b"` opened a heredoc named
- * `b` and every remaining line of the grader was discarded.
+ * `b` and every remaining line of the grader was discarded. Group 1 is the `-`,
+ * which decides how the body's terminator is matched.
  */
-const HEREDOC_START = /^<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
-
-/** A `ck` token sitting immediately before the quote that quotes its id. */
-const CK_BEFORE_QUOTE = /ck(?:_pass|_fail|_skip)?[ \t]+$/
+const HEREDOC_START = /^<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/
 
 /**
- * What `CK_CALL` is allowed to look at, plus the heredoc the line opens. The
+ * A `ck` token sitting immediately before the quote that quotes its id, **word
+ * anchored**. Unanchored it fired on any word ending in `ck`, and `-check` is the
+ * most natural suffix an RHCSA checkpoint id could have: `ck perm-check "checked;
+ * ck also-ran" $?` kept the whole description and declared `also-ran` as a second
+ * checkpoint. `-` is inside the class on purpose — that is what makes
+ * `perm-check` not a `ck` token.
+ */
+const CK_BEFORE_QUOTE = /(?:^|[^A-Za-z0-9_-])ck(?:_pass|_fail|_skip)?[ \t]+$/
+
+/**
+ * The id at the head of a quoted run, and nothing else. `CK_CALL`'s class is the
+ * definition of what an id may contain, so a space or a separator ends one.
+ */
+const QUOTED_ID = /^[A-Za-z0-9_][A-Za-z0-9_-]*/
+
+/**
+ * Where bash begins a new word, which is where a `#` begins a comment. These are
+ * its metacharacters, minus two: `<` and `>` are omitted because a redirect needs
+ * a target, so `>#` is a syntax error and the position is unreachable. `}` is
+ * omitted because it is **not** a metacharacter — measured, `{ true; }#note` is a
+ * bash syntax error and `${x}#tag` is a single word, so treating `}` as a word
+ * break (a previous review's list claimed it) would cut `echo ${x}#tag; ck real`
+ * at the `#` and lose a real checkpoint.
+ */
+const WORD_BREAK = /[ \t;&|()]/
+
+/** A heredoc this line opens, and whether `<<-` lets its terminator be indented. */
+interface PendingHeredoc {
+  delim: string
+  /** `<<-`: bash strips leading **tabs** from the terminator, never spaces. */
+  dash: boolean
+}
+
+/**
+ * What `CK_CALL` is allowed to look at, plus the heredocs the line opens. The
  * twin of `commandSketch`'s `scanLine`, and deliberately not shared with it: a
  * **quoted id must survive here** (`ck_pass 'home-from-lv' "…"` is a shape the
  * bank uses) and must not survive there (a quoted `sed` expression is argument
  * text). One scanner cannot be right for both.
  *
- * Three orderings in here are load-bearing, each because the alternative was
+ * Everything in here is measured against real bash by
+ * `test/server/checkpoint-oracle.ts`, which is the reason this walk is allowed to
+ * be this detailed: five of the six defects this function has had were introduced
+ * by a round that reasoned about shell syntax instead of running any.
+ *
+ * Five orderings and rules are load-bearing, each because the alternative was
  * measured wrong:
  *
  * 1. `<<` is read **before** any quote handling, so `<<'EOF'` still names its
  *    delimiter. Emptying quoted runs first loses it.
- * 2. A quoted run is emptied **unless** a `ck` token precedes it, so the phantom
- *    id in `printf "ok; ck phantom-id\n"` disappears while `ck_pass 'id'`
- *    survives. Emptying unconditionally breaks the quoted id.
+ * 2. A quoted run is emptied **unless** a word-anchored `ck` token precedes it,
+ *    and then only its leading id survives. So the phantom id in
+ *    `printf "ok; ck phantom-id\n"` disappears, `ck_pass 'home-from-lv'` is kept,
+ *    and `ck "real-id; ck phantom"` — where the id bash is handed is the entire
+ *    string — cannot declare two checkpoints. Keeping the whole run re-admitted
+ *    the phantom-id bug inside the exception meant to fix it.
  * 3. The comment cut happens inside the same walk, so a `#` inside a quoted run
  *    is not a comment. Stripping comments first truncated
  *    `printf "a # b"; ck real "d" $?` at the `#`, leaving an unterminated quote
  *    and losing a real checkpoint.
+ * 4. A closing quote is found with the **escapes honoured**, and only inside
+ *    double quotes and bare words — bash processes no escapes at all inside
+ *    single quotes, so `'it\'` is a complete run. Pairing quote characters
+ *    positionally left the walk running *inside* the string on an odd number of
+ *    `"`, which one `\"` in a description produces, and the rest of the line —
+ *    including `assert.sh`'s own documented `…; ck my-id "…" $?` form — was
+ *    discarded. Worse, a `<<` inside the desynchronised run then opened a phantom
+ *    heredoc that swallowed every remaining line of the grader.
+ * 5. `<<` is not a heredoc opener inside `$(( ))` or `(( ))`, where it is a left
+ *    shift. `want=$(( 1 << shift ))` opened a heredoc named `shift` and discarded
+ *    the rest of the file, while `$(( bytes << 3 ))` was fine because a literal
+ *    is not an identifier — a distinction no grader author could be expected to
+ *    hold in their head.
+ *
+ * Two shapes are known to disagree with bash, both pinned in
+ * `ORACLE_DIVERGENCES`, and they are not equivalent. A double-quoted run that
+ * **spans lines** over-counts, because the walk is line-at-a-time; that fails
+ * closed and loud, and carrying quote state across lines would trade it for the
+ * silent swallow-the-rest-of-the-file mode that four of this round's findings
+ * were instances of. ANSI-C quoting with an escaped quote (`$'a\'b'`)
+ * under-counts, because `$'…'` honours `\'` where a plain single-quoted run does
+ * not, so rule 4 does not reach it — that one is an **open fail-open risk**, not
+ * an accepted residual. It is unreachable in the bank today (no `$'` in any
+ * grader; the only `$'…'` in content/ are `$'\t'`-style control literals), which
+ * is why it is disclosed rather than closed, not why it is acceptable.
  */
-function scanLine(line: string): { code: string; heredoc?: string } {
+function scanLine(line: string): { code: string; heredocs: PendingHeredoc[] } {
   let code = ''
-  let heredoc: string | undefined
+  const heredocs: PendingHeredoc[] = []
+  /** Nesting depth of `$(( … ))` / `(( … ))`. */
+  let arith = 0
+  /** Nesting depth of `$( … )`, so its closing paren is not a word break. */
+  let subst = 0
+  /** Whether a `#` here would start a comment. */
+  let atWordStart = true
   let i = 0
 
   while (i < line.length) {
     const ch = line.charAt(i)
+
+    if (line.startsWith('$((', i) || line.startsWith('((', i)) {
+      arith += 1
+      code += ' '
+      i += line.startsWith('$((', i) ? 3 : 2
+      atWordStart = false
+      continue
+    }
+
+    if (arith > 0 && line.startsWith('))', i)) {
+      arith -= 1
+      code += ' '
+      i += 2
+      atWordStart = false
+      continue
+    }
+
+    // A command substitution's parens belong to the word around them: `$(date)#x`
+    // is one word, so the `#` is not a comment there while it is after the `)` of
+    // a subshell. Dropping them also keeps `CK_CALL`'s `(`/`)` anchors from
+    // firing on one.
+    if (line.startsWith('$(', i)) {
+      subst += 1
+      code += ' '
+      i += 2
+      atWordStart = false
+      continue
+    }
+    if (subst > 0 && ch === ')') {
+      subst -= 1
+      code += ' '
+      i += 1
+      atWordStart = false
+      continue
+    }
 
     // Defence in depth: the anchored HEREDOC_START already refuses `<<<`,
     // because the character after `<<` is `<`. Skipping all three keeps the
@@ -123,51 +226,98 @@ function scanLine(line: string): { code: string; heredoc?: string } {
     if (line.startsWith('<<<', i)) {
       code += ' '
       i += 3
+      atWordStart = false
       continue
     }
 
     if (line.startsWith('<<', i)) {
-      const m = HEREDOC_START.exec(line.slice(i))
-      if (heredoc === undefined && m?.[2] !== undefined) heredoc = m[2]
+      if (arith === 0) {
+        const m = HEREDOC_START.exec(line.slice(i))
+        const delim = m?.[3]
+        // Every opener on the line, in order: `cat <<A <<B` has bodies for both,
+        // and keeping only the first read `B`'s body as code.
+        if (delim !== undefined) heredocs.push({ delim, dash: m?.[1] === '-' })
+      }
       code += ' '
       i += 2
+      atWordStart = false
+      continue
+    }
+
+    // Outside a quoted run a backslash removes the next character's special
+    // meaning: `echo \"` opens no run, and `\#` starts no comment.
+    if (ch === '\\' && i + 1 < line.length) {
+      code += ' '
+      i += 2
+      atWordStart = false
       continue
     }
 
     if (ch === "'" || ch === '"') {
-      const close = line.indexOf(ch, i + 1)
+      const close = ch === '"' ? closingDoubleQuote(line, i) : line.indexOf(ch, i + 1)
+      const body = close === -1 ? line.slice(i + 1) : line.slice(i + 1, close)
       if (CK_BEFORE_QUOTE.test(code)) {
-        // The id itself. Keep it, quotes and all - `CK_CALL` allows the quote.
-        code += close === -1 ? line.slice(i) : line.slice(i, close + 1)
+        // The id itself, and only the id: an id cannot contain a space or a
+        // separator, so the rest of the run is description text with nothing in
+        // it for `CK_CALL` to find. The quotes stay because `CK_CALL` allows one.
+        code += ch + (QUOTED_ID.exec(body)?.[0] ?? '') + ch
       } else {
         // Argument text, and possibly a `; ck …` inside it. Keep the delimiters
         // so nothing on either side of the run gets glued together.
         code += ch + ch
       }
-      // An unclosed quote runs to end of line.
+      atWordStart = false
+      // An unclosed quote runs past the end of the line, so there is no more
+      // code on it - in bash's reading either.
       if (close === -1) break
       i = close + 1
       continue
     }
 
-    // A `#` starts a comment only at the start of a word, so `${lv_bytes#/}`
-    // survives.
-    if (ch === '#' && (i === 0 || /[ \t]/.test(line.charAt(i - 1)))) break
+    // A `#` starts a comment only at the start of a word, so `${lv_bytes#/}` and
+    // `${#s}` survive while `true;# note` and `(true)# note` are comments.
+    if (ch === '#' && atWordStart) break
 
     code += ch
     i += 1
+    atWordStart = WORD_BREAK.test(ch)
   }
 
-  return { code, heredoc }
+  return { code, heredocs }
+}
+
+/**
+ * The index of the `"` that closes the run opened at `open`, or -1. Bash pairs
+ * quote characters *after* removing escaped ones, so `\"` is not a candidate.
+ */
+function closingDoubleQuote(line: string, open: number): number {
+  let i = open + 1
+  while (i < line.length) {
+    const ch = line.charAt(i)
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (ch === '"') return i
+    i += 1
+  }
+  return -1
 }
 
 export function countCheckpoints(gradeScript: string): number {
   const ids = new Set<string>()
-  let heredoc: string | undefined
+  const pending: PendingHeredoc[] = []
 
   for (const raw of gradeScript.split('\n')) {
-    if (heredoc !== undefined) {
-      if (raw.trim() === heredoc) heredoc = undefined
+    const open = pending.at(0)
+    if (open !== undefined) {
+      // Bash's terminator rule, which `raw.trim() === delim` was not: a plain
+      // `<<EOF` body ends only at a line *equal* to the delimiter, `<<-EOF`
+      // strips leading tabs and never spaces, and a trailing space never
+      // terminates at all. Accepting all three ended the body early, and the
+      // lines bash treats as printed text were then read as code.
+      const candidate = open.dash ? raw.replace(/^\t+/, '') : raw
+      if (candidate === open.delim) pending.shift()
       continue
     }
 
@@ -175,7 +325,7 @@ export function countCheckpoints(gradeScript: string): number {
     // it runs: counting it inflates `expectedTotal` and reports a correct
     // solution as `incomplete`, which is a false *fail*.
     const scanned = scanLine(raw)
-    if (scanned.heredoc !== undefined) heredoc = scanned.heredoc
+    pending.push(...scanned.heredocs)
 
     for (const m of scanned.code.matchAll(CK_CALL)) {
       const id = m[1]
@@ -345,12 +495,24 @@ export class SessionStore {
   }
 
   /**
-   * Put the clock back to zero after the VM has been reverted. Everything else
-   * about the attempt survives, the rung most of all: see the `/reset` route.
+   * Put the clock back to zero after the VM has been reverted. The rung
+   * deliberately survives — see the `/reset` route — but the last grading result
+   * does **not**, because a reverted machine has no valid verdict.
+   *
+   * Measured, exam mode with an injected clock: grade → finish rated a 20-minute
+   * solve `good`, while grade → reset → finish rated the same verdict `easy`.
+   * `startedAt` had moved to the reset and `endedAt` was half a second later, so
+   * `deriveRating` saw `rungUsed <= 1 && durationS <= timeBudgetS` and laundered
+   * an over-budget attempt into a cold, inside-budget one — over a verdict
+   * measured on a machine that has since been wiped and re-`setup`'d. Clearing it
+   * makes `/finish` answer its existing 409 "nothing has been graded yet"
+   * instead, which is true. That keeps reset-to-retry working, which a 409 on
+   * `/reset`-after-grade would not.
    */
   restart(id: string, now: number): SessionRecord {
     const s = this.#require(id)
     s.startedAt = now
+    delete s.result
     return s
   }
 

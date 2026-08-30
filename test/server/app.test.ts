@@ -200,7 +200,7 @@ function runtime(over: Partial<LabRuntime> = {}) {
   return { rt, calls }
 }
 
-function app(over: Partial<LabRuntime> = {}) {
+function app(over: Partial<LabRuntime> = {}, now?: () => number) {
   const { rt, calls } = runtime(over)
   let clock = 1000
   const sessions = new SessionStore()
@@ -210,9 +210,23 @@ function app(over: Partial<LabRuntime> = {}) {
     sessions,
     assertLib: '',
     loadScripts: async () => SCRIPTS,
-    now: () => (clock += 1000),
+    now: now ?? (() => (clock += 1000)),
   })
   return { a, calls, sessions }
+}
+
+/**
+ * A clock that hands out named instants, so a derived rating can be *measured*
+ * rather than reasoned about. Holds the last instant once the list runs out, so a
+ * route that stops calling `now()` cannot make a test fail for the wrong reason.
+ */
+function clockOf(ticks: number[]): () => number {
+  let i = 0
+  return () => {
+    const t = ticks[Math.min(i, ticks.length - 1)]
+    i += 1
+    return t ?? 0
+  }
 }
 
 async function start(a: ReturnType<typeof app>['a'], mode: string, taskId: string = TASK.id) {
@@ -556,6 +570,69 @@ describe('grading and finishing', () => {
     const hint = await a.request(`/api/sessions/${id}/hint`, { method: 'POST' })
     expect(hint.status).toBe(200)
     expect(at(await hint.json(), 'rung')).toBe(2)
+  })
+
+  it('does not let a reset between grade and finish launder the rating', async () => {
+    // Measured before the fix, exam mode, fully passing verdict, 600 s budget:
+    //
+    //   grade -> finish            startedAt 0        endedAt 1200000  rating 'good'
+    //   grade -> reset -> finish   startedAt 1200000  endedAt 1200500  rating 'easy'
+    //
+    // `restart` moves `startedAt` to the reset, while `s.result` used to survive
+    // the VM revert - so /finish derived a rating from a verdict measured on a
+    // machine that has since been wiped and re-setup'd, over a clock saying the
+    // attempt took no time. A 20-minute solve on a 10-minute task came out as a
+    // cold, inside-budget one. /reset's own comment already states the principle
+    // ("a reset must not make the report describe an attempt that did not
+    // happen"); its guard just keys on the post-finish window, and this one is
+    // post-grade, pre-finish.
+    const passing: Partial<LabRuntime> = {
+      gradeTask: async () => ({
+        verdictA: parseVerdict(
+          [
+            '{"id":"lv-home-size","desc":"d","status":"pass"}',
+            '{"id":"fs-home-size","desc":"e","status":"pass"}',
+          ].join('\n'),
+        ),
+        regressions: [],
+        rebooted: false,
+      }),
+    }
+
+    // The honest baseline: the same verdict over the same 20 minutes, no reset.
+    const plain = app(passing, clockOf([0, 1_200_000]))
+    const pid = await start(plain.a, 'exam')
+    await plain.a.request(`/api/sessions/${pid}/grade`, { method: 'POST' })
+    const straight = await (
+      await plain.a.request(`/api/sessions/${pid}/finish`, { method: 'POST' })
+    ).json()
+    expect(at(straight, 'report', 'allPassed')).toBe(true)
+    expect(at(straight, 'rating')).toBe('good')
+
+    // The same attempt with a reset wedged in. A reverted machine has no valid
+    // verdict, so the only honest answer is the 409 /finish already has - not a
+    // rating, and certainly not 'easy'.
+    const { a } = app(passing, clockOf([0, 1_200_000, 1_200_500]))
+    const id = await start(a, 'exam')
+    await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })
+    expect((await a.request(`/api/sessions/${id}/reset`, { method: 'POST' })).status).toBe(200)
+
+    const laundered = await a.request(`/api/sessions/${id}/finish`, { method: 'POST' })
+    expect(laundered.status).toBe(409)
+    const refused = await laundered.json()
+    expect(str(refused, 'error')).toMatch(/nothing has been graded/)
+    expectMissing(refused, 'rating')
+
+    // And reset-to-retry still works, which a 409 on /reset-after-grade would
+    // not: grading the reverted machine produces a verdict that describes it, and
+    // the rating is then derived from the post-reset clock, which is the attempt
+    // that actually happened.
+    expect((await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })).status).toBe(200)
+    const retried = await a.request(`/api/sessions/${id}/finish`, { method: 'POST' })
+    expect(retried.status).toBe(200)
+    const scored = await retried.json()
+    expect(num(scored, 'startedAt')).toBe(1_200_000)
+    expect(at(scored, 'rating')).toBe('easy')
   })
 
   it('409s on finish before anything was graded', async () => {

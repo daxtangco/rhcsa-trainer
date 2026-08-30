@@ -136,11 +136,137 @@ describe('countCheckpoints', () => {
     // both in one walk and so depends on an ordering - the walk stops at the `#`
     // before it ever reaches these two `<`s - that nothing else asserts.
     expect(countCheckpoints('echo hi   # heredocs use << here\nck real-id "d" $?\n')).toBe(1)
-    // And the residual, disclosed rather than fixed: an arithmetic shift is not
-    // inside quotes, so it still opens a phantom heredoc named `shift`. No
-    // grader shifts, and reportFor's over-arrival warning is what would say so
-    // at runtime if one did.
-    expect(countCheckpoints('want=$(( 1 << shift ))\nck real-id "d" $?\n')).toBe(0)
+    // An arithmetic shift, which was disclosed as a residual for two rounds and
+    // is now closed: inside `$(( ))` a `<<` is a left shift, not a redirect. It
+    // used to open a phantom heredoc named `shift` and discard every line after
+    // it, while `$(( bytes << 3 ))` was counted - a distinction between a shift
+    // by an identifier and a shift by a literal that no grader author could be
+    // expected to hold in their head. Both are 1 now.
+    expect(countCheckpoints('want=$(( 1 << shift ))\nck real-id "d" $?\n')).toBe(1)
+    expect(countCheckpoints('want=$(( bytes << 3 ))\nck real-id "d" $?\n')).toBe(1)
+    expect(countCheckpoints('(( x = 1 << shift ))\nck real-id "d" $?\n')).toBe(1)
+    expect(countCheckpoints('want=$(( (2 + 1) << shift ))\nck real-id "d" $?\n')).toBe(1)
+  })
+
+  it('does not lose a ck after an escaped quote earlier on the line', () => {
+    // The fail-open regression round 3 introduced, and the one that matters most
+    // on this branch. The quote walk paired `"` characters positionally, which
+    // bash does not - it pairs them after removing escaped ones - so one `\"` in
+    // a description left the walk running *inside* the string and everything
+    // after it on the line was discarded. That line is the
+    // `some_condition; ck my-id "…" $?` form `content/lib/assert.sh:60` documents
+    // as *the* usage, so the checkpoint vanishes from `expectedTotal`, a grader
+    // killed partway matches the deflated total, `incomplete` stays false, and a
+    // student who changed nothing is told the task passed.
+    expect(countCheckpoints('echo "it\\"s ok"; ck real-id "d" $?\n')).toBe(1)
+    expect(countCheckpoints('echo "a\\"b"; ck lost-id "d" $?\n')).toBe(1)
+    expect(countCheckpoints('printf \'%s\\n\' "wanted \\" here"; ck real-id "d" $?\n')).toBe(1)
+    // A backslash outside any run escapes the quote too, so this opens nothing.
+    expect(countCheckpoints('echo \\"; ck real-id "d" $?\n')).toBe(1)
+    // An escaped backslash must not eat the closing quote.
+    expect(countCheckpoints('echo "a\\\\"; ck real-id "d" $?\n')).toBe(1)
+    // The worse variant, and the fourth route into "a phantom heredoc discards
+    // the rest of the file": the `<<` sits inside the run the walk lost track of.
+    expect(countCheckpoints('echo "a \\" b << EOF c"\nck one-id "d" 0\nck two-id "d" 0\n')).toBe(2)
+    // Even parity was always correct. Pinned so the characterisation stays exact
+    // - the bug was odd-parity only - and so a fix cannot regress these.
+    expect(countCheckpoints('grep -q "\\"Listen 82\\"" /etc/hosts; ck listen-set "d" $?\n')).toBe(1)
+    expect(countCheckpoints('ck first-id "a \\"b\\" c" 0\nck second-id "d" 0\n')).toBe(2)
+    // And the asymmetry the fix must not flatten: bash processes no escapes at
+    // all inside single quotes, so `'it\'` is a *complete* run. Honouring `\`
+    // there would lose the `ck` in the other direction.
+    expect(countCheckpoints("echo 'it\\'; ck real-id \"d\" $?\n")).toBe(1)
+    expect(countCheckpoints("echo 'a\\\"b'; ck real-id \"d\" $?\n")).toBe(1)
+  })
+
+  it('does not let a word merely ending in ck keep a quoted run, or one ck declare two ids', () => {
+    // The quoted-id exception, minimised. It exists only to preserve a quoted
+    // *id*, and an id cannot contain a space or a separator - so only the leading
+    // id-shaped prefix of the run survives and there is nothing left inside it
+    // for CK_CALL to find. Both of these were fail-closed: a phantom id makes a
+    // *complete* run on a correctly solved machine report `incomplete` and forces
+    // allPassed false, which is a false fail.
+    //
+    // `-check` is the most natural suffix an RHCSA checkpoint id could have, and
+    // `perm-check` is not a `ck` token.
+    expect(countCheckpoints('ck perm-check "checked; ck also-ran" $?\n')).toBe(1)
+    expect(countCheckpoints('ck fs-check "ran && ck nope" $?\n')).toBe(1)
+    expect(countCheckpoints('fsck "$dev; ck phantom" >/dev/null\nck real-id "d" 0\n')).toBe(1)
+    // The exception used as a weapon: the id bash is handed here is the whole
+    // string `real-id; ck phantom`, so there is exactly one checkpoint.
+    expect(countCheckpoints('ck "real-id; ck phantom" "d" $?\n')).toBe(1)
+    // And the shape the exception exists for still works.
+    expect(countCheckpoints("ck_pass 'home-from-lv' \"desc\"\n")).toBe(1)
+    expect(countCheckpoints('ck "quoted-id" "desc" $?\n')).toBe(1)
+  })
+
+  it('ends a heredoc body where bash ends it, not where trim() does', () => {
+    // Bash ends a `<<EOF` body only at a line *equal* to the delimiter. Matching
+    // `raw.trim()` accepted a tab-indented and a trailing-space `EOF` too, so the
+    // body ended early and the lines bash treats as printed text were read as
+    // code - an over-count, so a false fail.
+    expect(
+      countCheckpoints('cat <<EOF\n\tEOF\nck phantom "d" 0\nEOF\nck real-id "d" 0\n'),
+    ).toBe(1)
+    expect(
+      countCheckpoints('cat <<EOF\nEOF \nck phantom "d" 0\nEOF\nck real-id "d" 0\n'),
+    ).toBe(1)
+    // `<<-` strips leading tabs, so this one does terminate...
+    expect(
+      countCheckpoints('cat <<-EOF\n\tck heredoc-id "x" 0\n\tEOF\nck real-id "y" 0\n'),
+    ).toBe(1)
+    // ...and never strips spaces, so this one does not.
+    expect(
+      countCheckpoints('cat <<-EOF\n  EOF\nck phantom "d" 0\nEOF\nck real-id "d" 0\n'),
+    ).toBe(1)
+    // Every opener on the line, in order. Keeping only the first read `B`'s body
+    // as code once `A` had terminated.
+    expect(
+      countCheckpoints('cat <<A <<B\nbody-a\nA\nck phantom "d" 0\nB\nck real-id "d" 0\n'),
+    ).toBe(1)
+  })
+
+  it('starts a comment wherever bash starts a word, and nowhere else', () => {
+    // Bash begins a comment at the start of a word, and its word delimiters are
+    // its metacharacters - so `;`, `&`, `|`, `(` and `)` begin one just as
+    // whitespace does. Requiring whitespace missed all of them.
+    expect(countCheckpoints('true;# note; ck phantom "d" 0\nck real-id "d" 0\n')).toBe(1)
+    expect(countCheckpoints('(true)# note; ck phantom "d" 0\nck real-id "d" 0\n')).toBe(1)
+    expect(countCheckpoints('true &#note; ck phantom "d" 0\nck real-id "d" 0\n')).toBe(1)
+    // The fail-open one: a `<<` inside a comment the walk did not recognise
+    // opened a phantom heredoc and discarded every remaining line of the grader.
+    expect(countCheckpoints('true;#uses <<EOF style\nck real-id "d" 0\n')).toBe(1)
+    // The other direction, and the reason `}` is deliberately *not* on that list
+    // even though a previous review's wording put it there: `}` is not a bash
+    // metacharacter. Measured - `{ true; }#note` is a syntax error and `${x}#tag`
+    // is a single word - so treating `}` as a word break would cut this line at
+    // the `#` and lose a real checkpoint, which is the fail-open direction.
+    expect(countCheckpoints('x=abc; y=${x}#tag; ck real-id "$y" 0\n')).toBe(1)
+    // Parameter expansion, where a `#` is never a comment.
+    expect(countCheckpoints('x=/abc; y=${x#/}; ck real-id "$y" 0\n')).toBe(1)
+    expect(countCheckpoints('s=abc; echo ${#s}; ck real-id "d" 0\n')).toBe(1)
+    expect(countCheckpoints('echo a#b; ck real-id "d" 0\n')).toBe(1)
+    expect(countCheckpoints('echo \\#; ck real-id "d" 0\n')).toBe(1)
+  })
+
+  it('sees a ck after then, do, else, a brace group, a subshell or a case label', () => {
+    // This group used to be a documented known-miss list, and the list was wrong
+    // twice. The second time it was wrong about the member the bank is closest to
+    // writing: a `case` label is a *closing* paren, so `enabled) ck en-id "d" 0`
+    // counted 0 against bash's 1, and no reader gets that from "`(`". `case` is
+    // already the bank's idiom - 014's grade.sh and assert.sh each contain one.
+    // Every miss here is a silent fail-open; an over-count from too wide a
+    // pattern is a false fail, which is loud. So the pattern is widened, and the
+    // differential oracle is what makes that verifiable.
+    expect(countCheckpoints('case enabled in\n  enabled) ck en-id "d" 0 ;;\nesac\n')).toBe(1)
+    expect(countCheckpoints('if true; then ck then-id "d" 0; fi\n')).toBe(1)
+    expect(countCheckpoints('for x in a; do ck do-id "d" 0; done\n')).toBe(1)
+    expect(countCheckpoints('if false; then true; else ck else-id "d" 0; fi\n')).toBe(1)
+    expect(countCheckpoints('{ ck brace-id "d" 0; }\n')).toBe(1)
+    expect(countCheckpoints('( ck paren-id "d" 0 )\n')).toBe(1)
+    expect(countCheckpoints('(ck tight-id "d" 0)\n')).toBe(1)
+    // A word merely *ending* in one of the keywords is not the keyword.
+    expect(countCheckpoints('mydo ck arg-id "d" 0\n')).toBe(0)
   })
 
   it('does not count a ck that a string only mentions after a separator', () => {
