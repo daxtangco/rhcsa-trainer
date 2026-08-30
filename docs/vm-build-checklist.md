@@ -147,12 +147,29 @@ Log in as `student` at the console.
    ip -4 addr show scope global
    ```
 
-5. Run `scripts/guest-provision.sh` (Task 19) **from the VM console, not over
-   ssh**; it will ask for `student`'s password once and never again. Its first
-   act is to install `/etc/sudoers.d/rhcsa-trainer`, and after that every
-   `sudo` in the guest — including every grader, setup script and solution the
-   app runs — needs no password. The console is the only place that first
-   prompt can be answered, which is why this step is not automated.
+5. Install passwordless `sudo` for `student`, **at the console, not over
+   ssh** — `sudo` prompts for `student`'s password the first time, and the
+   console is the only place that prompt can be answered:
+
+   ```bash
+   printf 'student ALL=(ALL) NOPASSWD: ALL\n' | sudo tee /etc/sudoers.d/rhcsa-trainer >/dev/null
+   sudo chmod 0440 /etc/sudoers.d/rhcsa-trainer
+   sudo visudo -cf /etc/sudoers.d/rhcsa-trainer
+   sudo -n true && echo "passwordless sudo is in effect"
+   ```
+
+   **The `visudo -cf` check is not decoration.** A malformed drop-in can lock
+   `sudo` out of the machine entirely. If it does not print `parsed OK`, fix or
+   remove the file before logging out of the console — that is the last moment
+   this can be fixed without falling back to `golden`.
+
+   `sudo -n true` printing `passwordless sudo is in effect` is the proof it
+   worked. After this, every `sudo` in the guest — including every grader,
+   setup script, solution and anti-solution the app runs — needs no password,
+   and nothing in the project works without it. `scripts/provision.sh` (Task
+   19) does the rest of the guest configuration — the ssh key, the local
+   repo, the packages — automatically, so there is nothing else to run by
+   hand here.
 
 ## 4. Verify from the WSL host
 
