@@ -141,24 +141,31 @@ hdr "ICMP"
 # apart on its own.
 ping_out=$(ping -c 3 -W 2 "$ip" 2>&1)
 ping_rc=$?
-printf '%s\n' "$ping_out" | sed 's/^/  /'
 icmp_no_claim=no
-if printf '%s' "$ping_out" | grep -qE '\+[1-9][0-9]* errors|Destination (Host|Net) Unreachable'; then
-  icmp_no_claim=yes
-fi
 if [[ $ping_rc -eq 0 ]]; then
+  # Anything answering the ping means the address is claimed - full stop.
+  # "Nothing claims this address" is false by definition here, even if an
+  # earlier packet in the same burst logged a transient ICMP error (e.g. a
+  # guest finishing its boot mid-ping). The raw dump is only evidence on the
+  # failure paths below, so it stays there and only there.
   say "ok: ping $ip"
-elif [[ $icmp_no_claim == yes ]]; then
-  say "ping got an ICMP error above (a '+N errors' count or a Destination"
-  say "Unreachable line) - nothing at $ip is claiming that address at all."
-  say "That's independent evidence the TCP check below can't produce on its"
-  say "own, and it outranks a silent TCP timeout: a spent ICMP error budget"
-  say "looks identical to a real firewall drop at the TCP layer."
 else
-  say "warn: ping showed plain packet loss with no ICMP error. Not conclusive"
-  say "      by itself - Windows Firewall commonly drops ICMP while still"
-  say "      forwarding TCP - but combined with a silent TCP timeout below,"
-  say "      this combination is the firewall signature."
+  printf '%s\n' "$ping_out" | sed 's/^/  /'
+  if printf '%s' "$ping_out" | grep -qE '\+[1-9][0-9]* errors|Destination (Host|Net) Unreachable'; then
+    icmp_no_claim=yes
+  fi
+  if [[ $icmp_no_claim == yes ]]; then
+    say "ping got an ICMP error above (a '+N errors' count or a Destination"
+    say "Unreachable line) - nothing at $ip is claiming that address at all."
+    say "That's independent evidence the TCP check below can't produce on its"
+    say "own, and it outranks a silent TCP timeout: a spent ICMP error budget"
+    say "looks identical to a real firewall drop at the TCP layer."
+  else
+    say "warn: ping showed plain packet loss with no ICMP error. Not conclusive"
+    say "      by itself - Windows Firewall commonly drops ICMP while still"
+    say "      forwarding TCP - but combined with a silent TCP timeout below,"
+    say "      this combination is the firewall signature."
+  fi
 fi
 
 hdr "TCP/22"
