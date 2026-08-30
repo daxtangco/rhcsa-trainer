@@ -35,13 +35,28 @@
  *   measured pair so it stays visible. A shape is only allowed in here with a
  *   direction (`over` fails closed and loud, `under` fails open and silent) and a
  *   reason it is not fixed. It is not a place to park an under-count.
+ *
+ * **Both lists compare id sets, not the two cardinalities.** That distinction is
+ * the reason this file changed after the round that introduced it: `bash === 1 &&
+ * counter === 1` is satisfied by a compensating pair, one phantom id gained while
+ * one real id is lost, and a count comparison cannot see it. Nothing at runtime
+ * can see it either, because `expectedTotal` is a number. Exactly one case
+ * legitimately declares a different id from the one bash emits, it says so, and
+ * even there the counts still have to agree.
+ *
+ * What this table still cannot check is whether an entry's prose *describes the
+ * shape it pins*. The divergence this round retired had internally consistent
+ * numbers, a correctly derived direction and a green guard, and was wrong anyway:
+ * the snippet exhibited the harmless face of the shape while the prose claimed the
+ * shape was unreachable. That failure mode is a review problem, not an assertion
+ * problem — so where a shape has two faces, pin both.
  */
 import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { countCheckpoints } from '../../src/server/session.ts'
+import { checkpointIds } from '../../src/server/session.ts'
 
 /** A literal tab, so a heredoc terminator's indentation is visible in source. */
 const TAB = '\t'
@@ -56,6 +71,17 @@ export interface OracleCase {
   name: string
   /** The grader fragment. Must be single-path — see the module docstring. */
   script: string
+  /**
+   * The ids the counter is expected to declare, when they deliberately differ
+   * from the ids bash emits. Omitted almost everywhere, because the gate is that
+   * the two **id sets are equal** — comparing only the two cardinalities lets a
+   * compensating pair through, one phantom id gained while one real id is lost.
+   *
+   * Setting this excuses *which* ids, never **how many**: the count comparison is
+   * unconditional, so an override cannot hide a miscount, only a renaming. Exactly
+   * one shape needs it, and the reason is in that entry.
+   */
+  counterIds?: string[]
 }
 
 /**
@@ -122,8 +148,15 @@ export const ORACLE_CASES: OracleCase[] = [
   },
   {
     // The exception used as a weapon: the id bash is handed is the whole string.
+    //
+    // The one case in the table whose id set legitimately differs from bash's.
+    // Bash's id is the entire string, spaces and all; the counter truncates a
+    // quoted id to its first word on purpose (R3), because keeping the whole run
+    // re-admitted the phantom-id bug the quoted-id exception exists to fix. What
+    // has to agree — and does — is the *count*: one checkpoint, not two.
     name: 'r3-separator-inside-quoted-id',
     script: sh('ck "real-id; ck phantom" "d" 0'),
+    counterIds: ['real-id'],
   },
   { name: 'pin-quoted-id-single', script: sh(`ck_pass 'home-from-lv' "desc"`) },
   { name: 'pin-quoted-id-double', script: sh('ck "quoted-id" "desc" 0') },
@@ -311,6 +344,181 @@ export const ORACLE_CASES: OracleCase[] = [
   },
   { name: 'pin-single-quotes-inside-double', script: sh(`echo "a 'b' c"; ck real-id "d" 0`) },
   { name: 'pin-double-quotes-inside-single', script: sh(`echo 'a "b" c'; ck real-id "d" 0`) },
+
+  // ------------------------------------- a quoted run that spans lines (was a
+  // ------------------------------------- divergence, and was disclosed wrongly)
+  //
+  // These were pinned as a single `over`/loud/double-quoted divergence that "no
+  // grader in the bank contains". Measured, every part of that was wrong: the
+  // natural arrangement is a silent **under**-count, single-quoted behaves
+  // identically and single is what the bank contains, and `content/lib/assert.sh`
+  // holds three multi-line single-quoted `awk` programs while `harness.ts:65`
+  // prepends it to all five graders before counting. They are cases now, not
+  // divergences, because the counter carries the open quote across the newline.
+  {
+    // `assert.sh`'s own two documented idioms composed: a multi-line `awk` program
+    // closed on the same line as the `ck` that checks its exit status. This is the
+    // shape that made a student who never edited /etc/fstab read as complete.
+    name: 'multiline-awk-then-ck-same-line',
+    script: sh(`awk 'BEGIN {`, ' exit 0', `}' /etc/fstab; ck fstab-checked "d" $?`),
+  },
+  {
+    name: 'multiline-awk-then-two-ck',
+    script: sh(`awk 'BEGIN {`, ' exit 0', `}'; ck one-id "d" $?; ck two-id "d" 0`),
+  },
+  {
+    // `assert.sh:150-153`'s `is_persistent` fstab body, inlined with the `then ck`
+    // form the library documents. The condition is arranged to be true so the
+    // fragment stays single-path.
+    name: 'multiline-awk-is-persistent-shape',
+    script: sh(
+      `if awk -v t="x" '`,
+      '      /^[[:space:]]*#/ { next }',
+      `      END { exit 0 }' /etc/hosts; then ck persist-config "d" 0; fi`,
+    ),
+  },
+  { name: 'multiline-single-quoted', script: sh(`echo 'a`, `b'; ck real-id "d" 0`) },
+  { name: 'multiline-double-quoted', script: sh('echo "a', 'b"; ck real-id "d" 0') },
+  {
+    // The unbounded half, and the reason the old entry's cost argument was
+    // inverted: the `<<` on a middle line is *string content* to bash, but the
+    // line-at-a-time walk read it as code and queued a heredoc whose terminator
+    // never arrives — discarding every remaining line of the grader. The
+    // swallow-the-rest-of-the-file mode was reachable *before* this fix, not after.
+    name: 'multiline-double-quoted-holds-heredoc',
+    script: sh('msg="a', 'cat <<EOF', 'b"', 'ck real-id "d" 0', 'ck two-id "d" 0'),
+  },
+  {
+    name: 'multiline-single-quoted-holds-heredoc',
+    script: sh(`msg='a`, 'cat <<EOF', `b'`, 'ck real-id "d" 0', 'ck two-id "d" 0'),
+  },
+  {
+    // The shape the previous round pinned as the loud over-count. It is not a
+    // divergence any more: the second line is string content up to its closing
+    // quote, so the phantom id is gone and the count equals bash's.
+    name: 'multiline-run-closed-on-next-line',
+    script: sh('x="a', 'ck phantom-id "', 'ck real-id "d" 0'),
+  },
+  {
+    // A run may stay open across several lines, and the id survives on the
+    // *opening* line, so a `ck` whose description spans lines still counts.
+    name: 'multiline-description-spans-lines',
+    script: sh('ck real-id "line one', 'line two', 'line three" 0'),
+  },
+  {
+    // An unterminated run at end of file: bash prints "unexpected EOF" and runs
+    // nothing further, and the counter declares nothing further either.
+    name: 'multiline-unterminated-at-eof',
+    script: sh('ck real-id "d" 0', 'x="never closed'),
+  },
+
+  // ------------------------------------------------------- ANSI-C quoting ($'…')
+  {
+    // Was a divergence. Inside `$'…'` bash **does** honour `\'`, unlike a plain
+    // single-quoted run, so pairing the quotes without escapes closed the run one
+    // quote early and desynchronised the rest of the line: R1 through a third
+    // quoting form, in the fail-open direction.
+    name: 'ansi-c-escaped-quote',
+    script: sh(String.raw`echo $'a\'b'; ck real-id "d" 0`),
+  },
+  {
+    // The seven `$'…'` in `assert.sh` are all of this shape — control literals
+    // with no escaped quote — and it is prepended to every grader.
+    name: 'ansi-c-control-literal',
+    script: sh(String.raw`echo $'\t'; ck real-id "d" 0`),
+  },
+  {
+    // `$'…'` really does span lines, so the carried state has to remember which
+    // of the three quoting forms it is inside, not just the quote character.
+    name: 'ansi-c-spanning-lines',
+    script: sh(String.raw`x=$'a`, String.raw`b'; ck real-id "d" 0`),
+  },
+  {
+    name: 'ansi-c-spanning-lines-escaped-quote',
+    script: sh(String.raw`x=$'a\'`, String.raw`b'; ck real-id "d" 0`),
+  },
+  {
+    // The reason the `$` is *tracked* rather than read back off the line: here the
+    // `$` is escaped, so this is a **plain** single-quoted run and `\'` does not
+    // close it. Deciding ANSI-C with `line.charAt(i - 1) === '$'` loses this `ck`.
+    name: 'ansi-c-escaped-dollar-is-not-ansi-c',
+    script: sh(String.raw`echo \$'a\'; ck real-id "d" 0`),
+  },
+
+  // --------------------------------------- command substitution, `$( )` (M-J)
+  //
+  // Suppressing a `ck` inside `$( )` is **correct, not approximate**: its JSONL is
+  // captured into the substitution, so the harness never receives it and the
+  // counter must not declare it. Both directions are load-bearing and neither was
+  // pinned when the mechanism was introduced.
+  {
+    // Delete the `$(` depth tracking and the `)` becomes a word break, so the `#`
+    // reads as a comment and this real checkpoint is lost. Fail-open.
+    name: 'subst-closing-paren-is-not-a-word-break',
+    script: sh('y=$(echo a)#tag; ck real-id "$y" 0'),
+  },
+  {
+    // The other direction: without the tracking, the captured `ck` is declared as
+    // a checkpoint that can never arrive. Fail-closed.
+    name: 'subst-ck-inside-is-not-emitted',
+    script: sh('x=$(ck phantom "d" 0)', 'ck real-id "d" 0'),
+  },
+
+  // --------------------------------------------- heredoc delimiters: bash words
+  //
+  // A delimiter is an ordinary bash word, not an identifier. The regex this
+  // replaced failed in **both** directions, and the first three are silent
+  // fail-opens that discard every remaining line of the grader.
+  { name: 'hd-delim-hyphenated', script: sh('cat <<EOF-1', 'body', 'EOF-1', 'ck real-id "d" 0') },
+  { name: 'hd-delim-dotted', script: sh('cat <<EOF.txt', 'body', 'EOF.txt', 'ck real-id "d" 0') },
+  {
+    // Quote removal applies to *part* of a word: the delimiter is `EOF`.
+    name: 'hd-delim-partly-quoted',
+    script: sh(`cat <<E'OF'`, 'body', 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    // The common idiom for a literal heredoc. The regex matched nothing at all, so
+    // the body was scanned as code and the phantom was counted.
+    name: 'hd-delim-backslash-quoted',
+    script: sh('cat <<\\EOF', 'ck phantom "d" 0', 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    name: 'hd-delim-quoted-hyphenated',
+    script: sh(`cat <<'END-OF-MSG'`, 'ck phantom "d" 0', 'END-OF-MSG', 'ck real-id "d" 0'),
+  },
+  {
+    // A delimiter may start with a digit; an identifier may not.
+    name: 'hd-delim-leading-digit',
+    script: sh('cat <<2EOF', 'ck phantom "d" 0', '2EOF', 'ck real-id "d" 0'),
+  },
+  {
+    name: 'hd-delim-then-redirect',
+    script: sh('cat <<EOF >/dev/null', 'ck phantom "d" 0', 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    // The shape that makes `WORD_END` carry `<` and `>` load-bearing: with no
+    // space, only the redirection operator ends the delimiter. Measured, bash
+    // reads the delimiter as `EOF` here and redirects the body — so dropping `>`
+    // from `WORD_END` would name the delimiter `EOF>/dev/null`, never match the
+    // terminator, and discard the rest of the grader. `WORD_BREAK` still must not
+    // carry them: that list answers where a `#` starts a comment, where `>#` is a
+    // syntax error, and adding them there re-opens R6.
+    name: 'hd-delim-tight-redirect',
+    script: sh('cat <<EOF>/dev/null', 'ck phantom "d" 0', 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    name: 'hd-delim-then-pipe',
+    script: sh('cat <<EOF | cat', 'ck phantom "d" 0', 'EOF', 'ck real-id "d" 0'),
+  },
+  {
+    name: 'hd-delim-dash-hyphenated',
+    script: sh('cat <<-END-OF-MSG', `${TAB}ck phantom "d" 0`, `${TAB}END-OF-MSG`, 'ck real "d" 0'),
+  },
+  {
+    // A space between `<<` and the delimiter is legal.
+    name: 'hd-delim-after-space',
+    script: sh('cat << EOF', 'ck phantom "d" 0', 'EOF', 'ck real-id "d" 0'),
+  },
 ]
 
 /**
@@ -325,44 +533,83 @@ export const ORACLE_CASES: OracleCase[] = [
  * this list is a bug being tolerated, not a shape being documented.
  */
 export interface OracleDivergence extends OracleCase {
-  direction: 'over' | 'under'
-  bash: number
-  counter: number
+  /**
+   * `both` is the compensating pair — a phantom id gained *and* a real id lost on
+   * the same input. It is listed because it is the case a cardinality comparison
+   * cannot see at all, and because nothing on `GradeReport` can see it either:
+   * `expectedTotal` is a number, so the two errors cancel and the `incomplete`
+   * guard is silently disarmed. If one ever appears here it is a defect, not a
+   * residual.
+   */
+  direction: 'over' | 'under' | 'both'
+  /** The ids real bash emits. */
+  bashIds: string[]
+  /** The ids the counter declares. Differs from `bashIds` — that is the point. */
+  counterIds: string[]
   /** Why it is not closed. */
   why: string
 }
 
 export const ORACLE_DIVERGENCES: OracleDivergence[] = [
   {
-    name: 'quoted-run-spanning-lines',
-    script: sh('x="a', 'ck phantom-id "', 'ck real-id "d" 0'),
-    direction: 'over',
-    bash: 1,
-    counter: 2,
+    name: 'command-prefix-before-ck-negation',
+    script: sh('! ck real-id "d" 1'),
+    direction: 'under',
+    bashIds: ['real-id'],
+    counterIds: [],
     why:
-      'The scan is line-at-a-time, so a double-quoted run that spans lines is ' +
-      'not tracked and the second line reads as code. Carrying quote state ' +
-      'across lines would trade this loud over-count for a silent under-count: ' +
-      'one line the walk misreads would then swallow every line after it, which ' +
-      'is the failure mode four of this round\'s six findings are instances of. ' +
-      'No grader in the bank contains a multi-line string.',
+      "`CK_CALL` recognises a `ck` at the start of a line or after one of `;&|{()`, " +
+      'and that set does not cover every position where bash still begins a ' +
+      'command. A `!` negation is one; the same miss covers `LC_ALL=C ck …`, ' +
+      '`time ck …` and `eval \'ck …\'`, each measured at 0 against bash 1. Closing ' +
+      'it means recognising bash command prefixes rather than punctuation, which ' +
+      'is a larger change than the reachability justifies: measured, no grader in ' +
+      'the bank negates, prefixes, times or evals a `ck`, and the six counts the ' +
+      'bank pins are unmoved. It is a silent fail-open, not an accepted residual.',
   },
   {
-    name: 'ansi-c-quoting-with-escaped-quote',
-    script: sh(String.raw`echo $'a\'b'; ck real-id "d" 0`),
+    name: 'continuation-between-ck-and-id',
+    script: sh('ck \\', 'cont-id "d" 0'),
     direction: 'under',
-    bash: 1,
-    counter: 0,
+    bashIds: ['cont-id'],
+    counterIds: [],
     why:
-      'Inside `$\'…\'` bash *does* honour `\\\'`, unlike a plain single-quoted ' +
-      'run, so the walk closes the run one quote early and desynchronises for ' +
-      'the rest of the line. This is R1 through a third quoting form. It is ' +
-      'listed here rather than fixed because closing it means the walk has to ' +
-      'know it is in an ANSI-C run, which needs `$` lookbehind at every quote, ' +
-      'and the shape is not reachable in the bank: no `$\'` appears in any ' +
-      'grader, and the only `$\'…\'` uses anywhere in content/ are `$\'\\t\'`-style ' +
-      'control-character literals with no escaped quote in them. It is an open ' +
-      'fail-open risk, not an accepted residual.',
+      'A `\\` line continuation that falls between the `ck` token and its id puts ' +
+      'the id on the next line, and this walk has no lookahead: it matches an id ' +
+      'only on the line the token is on. A continuation *before* the `ck` counts ' +
+      'correctly, and so does one after the id, which is where every continuation ' +
+      'in the bank falls — measured. Fixing it means joining continued lines ' +
+      'before scanning, which changes what every other rule sees, and this is the ' +
+      'last round before the branch review. Silent fail-open, unreachable today.',
+  },
+  {
+    name: 'brace-list-containing-ck',
+    script: sh('echo {ck one,two}', 'ck real-id "d" 0'),
+    direction: 'over',
+    bashIds: ['real-id'],
+    counterIds: ['one', 'real-id'],
+    why:
+      '`{` is one of `CK_CALL`\'s separators because a brace group is a real place ' +
+      'for a `ck` to start, but a brace *list* is not: bash does not expand a ' +
+      'brace list containing a space, so `{ck one,two}` is printed literally and ' +
+      'emits nothing. The counter declares `one` as well as the real id. This is ' +
+      'the loud direction — `expectedTotal` lands high, `incomplete` fires on a ' +
+      'correct run and the student reports a false fail — and the unquoted-metachar ' +
+      'family it belongs to is parked for the static lint. Not in the bank.',
+  },
+  {
+    name: 'unquoted-sed-delimiter-holding-ck',
+    script: sh(String.raw`echo a | sed s|a|ck\ phantom|`, 'ck real-id "d" 0'),
+    direction: 'over',
+    bashIds: ['real-id'],
+    counterIds: ['phantom', 'real-id'],
+    why:
+      'An unquoted `|` used as a `sed` delimiter is a pipe to this walk, and ' +
+      '`CK_CALL` treats a pipe as a position a command may start at — so the `ck` ' +
+      "inside the substitution is declared. Same family as the brace list: it is " +
+      'the fail-closed direction, it needs the walk to model what `sed` does with ' +
+      'its own argument, and the sketcher-side version of this is already parked. ' +
+      'Measured absent from the bank; the six pinned counts are unmoved.',
   },
 ]
 
@@ -373,6 +620,12 @@ export interface OracleRow {
   /** What `countCheckpoints(script)` says. */
   counter: number
   bashIds: string[]
+  /**
+   * The ids the counter declared, not just how many. Both sides carry their ids
+   * so the gate can compare **sets**: a compensating pair leaves `bash` and
+   * `counter` equal and is invisible to a count comparison.
+   */
+  counterIds: string[]
 }
 
 /** Bash's stdout, whatever it exits with — a grader's exit code is ignored. */
@@ -436,7 +689,14 @@ export async function measureOracle(cases: OracleCase[] = ORACLE_CASES): Promise
           const file = join(dir, `case-${i + n}.sh`)
           await writeFile(file, `${assertLib}\n${c.script}`, 'utf8')
           const bashIds = idsFrom(await bashStdout(file))
-          return { name: c.name, bash: bashIds.length, counter: countCheckpoints(c.script), bashIds }
+          const counterIds = checkpointIds(c.script)
+          return {
+            name: c.name,
+            bash: bashIds.length,
+            counter: counterIds.length,
+            bashIds,
+            counterIds,
+          }
         }),
       )
       rows.push(...done)

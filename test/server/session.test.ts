@@ -148,6 +148,59 @@ describe('countCheckpoints', () => {
     expect(countCheckpoints('want=$(( (2 + 1) << shift ))\nck real-id "d" $?\n')).toBe(1)
   })
 
+  it('reads a heredoc delimiter as a bash word, not as an identifier', () => {
+    // `[A-Za-z_][A-Za-z0-9_]*` is narrower than a bash word, and it failed in both
+    // directions. Where it parsed a *prefix* of the real delimiter the terminator
+    // never matched and every remaining line of the grader was discarded - the
+    // silent fail-open. Where it matched nothing the body was scanned as code and
+    // its `ck`-looking text was counted - the false fail. Measured against bash,
+    // each of these was wrong before and each is 1 now.
+    expect(countCheckpoints('cat <<EOF-1\nbody\nEOF-1\nck real-id "d" 0\n')).toBe(1)
+    expect(countCheckpoints('cat <<EOF.txt\nbody\nEOF.txt\nck real-id "d" 0\n')).toBe(1)
+    // Quote removal applies to part of a word: the delimiter here is `EOF`.
+    expect(countCheckpoints("cat <<E'OF'\nbody\nEOF\nck real-id \"d\" 0\n")).toBe(1)
+    // `<<\EOF` is the common idiom for a literal heredoc, and a hyphenated
+    // delimiter is ordinary style. Both used to count the phantom in the body.
+    expect(countCheckpoints('cat <<\\EOF\nck phantom "d" 0\nEOF\nck real-id "d" 0\n')).toBe(1)
+    expect(
+      countCheckpoints("cat <<'END-OF-MSG'\nck phantom \"d\" 0\nEND-OF-MSG\nck real-id \"d\" 0\n"),
+    ).toBe(1)
+    // A delimiter may start with a digit; an identifier may not.
+    expect(countCheckpoints('cat <<2EOF\nck phantom "d" 0\n2EOF\nck real-id "d" 0\n')).toBe(1)
+    expect(
+      countCheckpoints('cat <<EOF >/dev/null\nck phantom "d" 0\nEOF\nck real-id "d" 0\n'),
+    ).toBe(1)
+    expect(countCheckpoints('cat <<EOF | cat\nck phantom "d" 0\nEOF\nck real-id "d" 0\n')).toBe(1)
+    // With no space, only the redirection operator ends the delimiter - which is
+    // what makes WORD_END carry `<` and `>` while WORD_BREAK deliberately does
+    // not. Measured, bash names the delimiter `EOF` here and redirects the body;
+    // without `>` in WORD_END the delimiter would be `EOF>/dev/null`, the
+    // terminator would never match and the rest of the grader would be discarded.
+    // WORD_BREAK must still exclude them: it answers where a `#` starts a comment,
+    // `>#` is a bash syntax error, and adding them there re-opens R6.
+    expect(countCheckpoints('cat <<EOF>/dev/null\nck phantom "d" 0\nEOF\nck real-id "d" 0\n')).toBe(1)
+    // `<<-` still strips tabs, and now does it for a non-identifier delimiter too.
+    expect(
+      countCheckpoints('cat <<-END-OF-MSG\n\tck phantom "d" 0\n\tEND-OF-MSG\nck real "d" 0\n'),
+    ).toBe(1)
+    // `cat <<` with no word is a bash syntax error, so it opens nothing and must
+    // not swallow the rest of the file either.
+    expect(countCheckpoints('cat <<\nck real-id "d" 0\n')).toBe(1)
+  })
+
+  it('does not count a ck whose output a command substitution captures', () => {
+    // Both directions of the `$( )` tracking, which the round that introduced it
+    // did not pin - deleting it broke no test. Suppressing a `ck` inside `$( )` is
+    // correct rather than approximate: its JSONL goes into the captured
+    // substitution, so the harness never receives it and the counter must not
+    // declare it. Counting it would make a correct run report `incomplete`.
+    expect(countCheckpoints('x=$(ck phantom "d" 0)\nck real-id "d" 0\n')).toBe(1)
+    // The other direction: the closing paren of a substitution is not a word
+    // break, so the `#` after it is part of the word and not a comment. Losing that
+    // loses a real checkpoint - the fail-open direction.
+    expect(countCheckpoints('y=$(echo a)#tag; ck real-id "$y" 0\n')).toBe(1)
+  })
+
   it('does not lose a ck after an escaped quote earlier on the line', () => {
     // The fail-open regression round 3 introduced, and the one that matters most
     // on this branch. The quote walk paired `"` characters positionally, which
@@ -177,6 +230,65 @@ describe('countCheckpoints', () => {
     // there would lose the `ck` in the other direction.
     expect(countCheckpoints("echo 'it\\'; ck real-id \"d\" $?\n")).toBe(1)
     expect(countCheckpoints("echo 'a\\\"b'; ck real-id \"d\" $?\n")).toBe(1)
+  })
+
+  it('carries an open quoted run across the newline, because bash does', () => {
+    // The previous round left this alone and disclosed it as a loud over-count on
+    // double-quoted runs that no grader contains. Measured, all three parts of
+    // that were wrong. The natural arrangement is a silent *under*-count, single
+    // quotes behave identically, and the shape is in the counted text today:
+    // `content/lib/assert.sh` has three multi-line single-quoted awk programs
+    // (:103-107, :150-153, :164-170) and `harness.ts:65` prepends it to every
+    // grader before counting. No checkpoint is lost there only because those three
+    // closing lines happen not to carry a trailing `ck` - a line-break coincidence
+    // nothing pinned.
+    //
+    // Composing the bank's own two documented idioms is what produces the loss: a
+    // multi-line awk program closed on the same line as the
+    // `some_condition; ck my-id "…" $?` form `assert.sh:60` documents. Measured
+    // against real bash, this counted 0 against bash's 1, so `expectedTotal` was
+    // short by one and a student who never edited /etc/fstab read as complete.
+    expect(countCheckpoints("awk 'BEGIN {\n exit 0\n}' /etc/fstab; ck fstab-checked \"d\" $?\n")).toBe(1)
+    expect(countCheckpoints("awk 'BEGIN {\n exit 0\n}'; ck one-id \"d\" $?; ck two-id \"d\" 0\n")).toBe(2)
+    // Both quote characters, because the entry claimed only double quotes.
+    expect(countCheckpoints("echo 'a\nb'; ck real-id \"d\" 0\n")).toBe(1)
+    expect(countCheckpoints('echo "a\nb"; ck real-id "d" 0\n')).toBe(1)
+    // The unbounded half, and the reason the entry's cost argument was inverted:
+    // the `<<` on a middle line is string content to bash, but a line-at-a-time
+    // walk read it as code and queued a heredoc whose terminator never arrives,
+    // discarding every remaining line. The swallow-the-rest-of-the-file mode this
+    // fix was said to risk introducing was *already reachable* without it.
+    expect(countCheckpoints('msg="a\ncat <<EOF\nb"\nck real-id "d" 0\nck two-id "d" 0\n')).toBe(2)
+    expect(countCheckpoints("msg='a\ncat <<EOF\nb'\nck real-id \"d\" 0\nck two-id \"d\" 0\n")).toBe(2)
+    // The shape the old entry pinned as the over-count. Now 1, which is bash.
+    expect(countCheckpoints('x="a\nck phantom-id "\nck real-id "d" 0\n')).toBe(1)
+    // A run may span more than two lines, and the id survives on the opening line.
+    expect(countCheckpoints('ck real-id "line one\nline two\nline three" 0\n')).toBe(1)
+    // An unterminated run at end of file: bash runs nothing after it either.
+    expect(countCheckpoints('ck real-id "d" 0\nx="never closed\n')).toBe(1)
+  })
+
+  it('honours an escaped quote inside ANSI-C quoting but not inside a plain single-quoted run', () => {
+    // R1 through a third quoting form, and the fail-open direction: inside `$'…'`
+    // bash *does* honour `\'`, so pairing the quotes without escapes closed the run
+    // one quote early and desynchronised the rest of the line. Unreachable through
+    // any grader's own text, but `$'` is already in the counted text - all seven
+    // occurrences are in `assert.sh:17-21,28,32`, which every grader inherits.
+    expect(countCheckpoints("echo $'a\\'b'; ck real-id \"d\" 0\n")).toBe(1)
+    // The shape assert.sh actually contains: a control literal, no escaped quote.
+    expect(countCheckpoints("echo $'\\t'; ck real-id \"d\" 0\n")).toBe(1)
+    // `$'…'` spans lines too, so the carried state has to remember *which* of the
+    // three quoting forms it is inside, not just the quote character.
+    expect(countCheckpoints("x=$'a\nb'; ck real-id \"d\" 0\n")).toBe(1)
+    expect(countCheckpoints("x=$'a\\'\nb'; ck real-id \"d\" 0\n")).toBe(1)
+    // The asymmetry the fix must not flatten, restated here because it is now one
+    // branch of a shared helper rather than two separate ones: a plain
+    // single-quoted run honours nothing, so `'it\'` is complete.
+    expect(countCheckpoints("echo 'it\\'; ck real-id \"d\" 0\n")).toBe(1)
+    // And why the `$` is tracked rather than read back off the line: here the `$`
+    // is escaped, so this is a plain run and `\'` does not close it. Deciding
+    // ANSI-C with `line.charAt(i - 1) === '$'` loses this checkpoint.
+    expect(countCheckpoints("echo \\$'a\\'; ck real-id \"d\" 0\n")).toBe(1)
   })
 
   it('does not let a word merely ending in ck keep a quoted run, or one ck declare two ids', () => {

@@ -67,22 +67,29 @@ export interface SessionRecord {
  * miss here is a silent fail-open, and an over-count from too wide a pattern is a
  * false *fail*, which is loud.
  *
- * A **line continuation is not** a miss, though it was once claimed here:
- * measured, `test -f /x \` followed by `  && ck cont-id "d" $?` counts 1, and so
- * does a continued bare `ck` — the separator alternation and the leading-space
- * alternation each cover it.
+ * A line continuation **before** the `ck` is not a miss, though the opposite was
+ * once claimed here: measured, `test -f /x \` followed by `  && ck cont-id "d" $?`
+ * counts 1, and so does `: \` followed by `; ck cont-id` — the separator
+ * alternation and the leading-space alternation each cover it. A continuation that
+ * falls **between `ck` and its id** is a miss, and this is where the earlier
+ * wording was too broad: measured, `ck \` followed by `cont-id "d" 0` counts 0
+ * against bash's 1, because the id has to be on the same line as the token. That
+ * is a silent under-count. No grader in the bank continues a line there — every
+ * continuation in the bank falls after the id — and the fix is a second line of
+ * lookahead this walk does not have.
  */
 const CK_CALL =
   /(?:^|[;&|{()])[ \t]*(?:(?:then|do|else)[ \t]+)?ck(?:_pass|_fail|_skip)?[ \t]+["']?([A-Za-z0-9_][A-Za-z0-9_-]*)/g
 
 /**
- * `<<EOF`, `<<-EOF` or `<<'EOF'`, **anchored** — it is matched against the slice
- * that starts at a `<<`, never against the whole line. Unanchored, it was the
- * same defect F8 fixed in `content.ts`: `echo "a << b"` opened a heredoc named
- * `b` and every remaining line of the grader was discarded. Group 1 is the `-`,
- * which decides how the body's terminator is matched.
+ * Where a bash **word** ends. This is `WORD_BREAK` plus `<` and `>`, and the two
+ * lists differ on purpose: `WORD_BREAK` answers "may a `#` here start a comment",
+ * where a redirect's `>` is unreachable because it needs a target, while this one
+ * answers "how far does this word run", where `cat <<EOF >out` plainly ends the
+ * delimiter at the `>`. Unifying them would put `>` back into the comment
+ * question and re-open R6.
  */
-const HEREDOC_START = /^<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/
+const WORD_END = /[ \t;&|()<>]/
 
 /**
  * A `ck` token sitting immediately before the quote that quotes its id, **word
@@ -119,6 +126,85 @@ interface PendingHeredoc {
 }
 
 /**
+ * The quoted run a line ended **inside**, carried to the next line. Bash's lexer
+ * is not line-at-a-time: `awk 'BEGIN {⏎ … ⏎}'` is one word spanning three lines,
+ * and `content/lib/assert.sh` — which `harness.ts:65` prepends to every grader
+ * before this counter runs — contains three of them (`:103-107`, `:150-153`,
+ * `:164-170`). Without this state the closing line reads as fresh code, so
+ * composing the bank's own two documented idioms — a multi-line `awk` program and
+ * `assert.sh:60`'s `some_condition; ck my-id "…" $?` — silently dropped the
+ * checkpoint: measured, `…}' /etc/fstab; ck fstab-checked "d" $?` counted 0
+ * against bash's 1. That is the fail-open direction, and it is unbounded, because
+ * a `<<` on a middle line of the run was read as code and queued a phantom
+ * heredoc whose terminator never arrives, discarding every remaining line.
+ */
+interface OpenQuote {
+  quote: string
+  /**
+   * `$'…'`, which honours `\'` where a plain single-quoted run does not — and
+   * which really does span lines: measured, `x=$'a⏎b'` is one word to bash.
+   */
+  ansiC: boolean
+}
+
+/**
+ * The heredoc a `<<` opens, given the slice of the line that starts at it, or
+ * `undefined` if it opens none. Called only from `scanLine`, and only outside
+ * `$(( ))`, so a left shift never reaches here.
+ *
+ * This was a regex (`/^<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/`) and a
+ * regex could not express it, because a delimiter is an ordinary bash **word**:
+ * quote removal applies to any part of it, and it ends at whitespace or a
+ * metacharacter, not at the end of an identifier. The old class was narrower than
+ * that in both directions, and both were measured wrong against bash:
+ *
+ * - `<<EOF-1`, `<<EOF.txt`, `<<E'OF'` → it parsed the delimiter as `EOF`, so the
+ *   real terminator never matched and **every remaining line of the grader was
+ *   discarded**. bash 1, counter 0 — a silent fail-open.
+ * - `<<\EOF`, `<<'END-OF-MSG'`, `<<2EOF` → it matched nothing at all, so the body
+ *   was scanned as code and any `ck`-looking text in it was counted. bash 1,
+ *   counter 2 — a false fail. `<<\EOF` is the common idiom for a literal heredoc
+ *   and a hyphenated delimiter is ordinary style.
+ *
+ * Quoting decides expansion inside the body, which this counter does not model,
+ * so it is only removed here and not recorded. What matters is the delimiter the
+ * terminator has to equal, which is the word after quote removal.
+ */
+function heredocDelimiter(slice: string): PendingHeredoc | undefined {
+  let i = 2
+  const dash = slice.charAt(i) === '-'
+  if (dash) i += 1
+  while (i < slice.length && (slice.charAt(i) === ' ' || slice.charAt(i) === '\t')) i += 1
+
+  let delim = ''
+  while (i < slice.length) {
+    const ch = slice.charAt(i)
+    // A backslash quotes exactly the next character: `<<\EOF` names `EOF`.
+    if (ch === '\\') {
+      if (i + 1 >= slice.length) break
+      delim += slice.charAt(i + 1)
+      i += 2
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      const close = closingQuote(slice, i + 1, ch, ch === '"')
+      // An unclosed run means the word runs off the end of the line; bash would
+      // keep reading, and this counter has nothing to read.
+      if (close === -1) return undefined
+      delim += slice.slice(i + 1, close)
+      i = close + 1
+      continue
+    }
+    if (WORD_END.test(ch)) break
+    delim += ch
+    i += 1
+  }
+
+  // `cat <<` with no word is a bash syntax error, so there is no heredoc to open.
+  return delim === '' ? undefined : { delim, dash }
+}
+
+/**
  * What `CK_CALL` is allowed to look at, plus the heredocs the line opens. The
  * twin of `commandSketch`'s `scanLine`, and deliberately not shared with it: a
  * **quoted id must survive here** (`ck_pass 'home-from-lv' "…"` is a shape the
@@ -130,7 +216,7 @@ interface PendingHeredoc {
  * be this detailed: five of the six defects this function has had were introduced
  * by a round that reasoned about shell syntax instead of running any.
  *
- * Five orderings and rules are load-bearing, each because the alternative was
+ * Six orderings and rules are load-bearing, each because the alternative was
  * measured wrong:
  *
  * 1. `<<` is read **before** any quote handling, so `<<'EOF'` still names its
@@ -145,33 +231,33 @@ interface PendingHeredoc {
  *    is not a comment. Stripping comments first truncated
  *    `printf "a # b"; ck real "d" $?` at the `#`, leaving an unterminated quote
  *    and losing a real checkpoint.
- * 4. A closing quote is found with the **escapes honoured**, and only inside
- *    double quotes and bare words — bash processes no escapes at all inside
- *    single quotes, so `'it\'` is a complete run. Pairing quote characters
- *    positionally left the walk running *inside* the string on an odd number of
- *    `"`, which one `\"` in a description produces, and the rest of the line —
- *    including `assert.sh`'s own documented `…; ck my-id "…" $?` form — was
- *    discarded. Worse, a `<<` inside the desynchronised run then opened a phantom
- *    heredoc that swallowed every remaining line of the grader.
+ * 4. A closing quote is found with the **escapes honoured in the two forms that
+ *    honour them** — `"…"` and `$'…'` — and not in a plain `'…'`, where bash
+ *    processes no escapes at all and `'it\'` is therefore a complete run. See
+ *    `closingQuote`: all three answers are measured, and collapsing any two of
+ *    them re-opens R1 in one direction or the other.
  * 5. `<<` is not a heredoc opener inside `$(( ))` or `(( ))`, where it is a left
  *    shift. `want=$(( 1 << shift ))` opened a heredoc named `shift` and discarded
  *    the rest of the file, while `$(( bytes << 3 ))` was fine because a literal
  *    is not an identifier — a distinction no grader author could be expected to
  *    hold in their head.
+ * 6. A quoted run that does not close **carries to the next line** rather than
+ *    ending the scan, because bash's lexer is not line-at-a-time either. See
+ *    `OpenQuote` for the measured fail-open this closes and why the shape is
+ *    already present in the counted text.
  *
- * Two shapes are known to disagree with bash, both pinned in
- * `ORACLE_DIVERGENCES`, and they are not equivalent. A double-quoted run that
- * **spans lines** over-counts, because the walk is line-at-a-time; that fails
- * closed and loud, and carrying quote state across lines would trade it for the
- * silent swallow-the-rest-of-the-file mode that four of this round's findings
- * were instances of. ANSI-C quoting with an escaped quote (`$'a\'b'`)
- * under-counts, because `$'…'` honours `\'` where a plain single-quoted run does
- * not, so rule 4 does not reach it — that one is an **open fail-open risk**, not
- * an accepted residual. It is unreachable in the bank today (no `$'` in any
- * grader; the only `$'…'` in content/ are `$'\t'`-style control literals), which
- * is why it is disclosed rather than closed, not why it is acceptable.
+ * What is left is a **line-at-a-time walk over a grammar that is not**, and rule
+ * 6 narrows that gap without closing it. The residual classes are pinned in
+ * `ORACLE_DIVERGENCES` with measured pairs; the largest is `CK_CALL`'s anchor set,
+ * which does not know the positions where a command may still begin (`! ck …`,
+ * `LC_ALL=C ck …`, `time ck …`, `eval 'ck …'`, and a `\` continuation that
+ * separates `ck` from its id). Every one of those is a silent **under**-count, and
+ * none is reachable in the bank today.
  */
-function scanLine(line: string): { code: string; heredocs: PendingHeredoc[] } {
+function scanLine(
+  line: string,
+  carried: OpenQuote | undefined,
+): { code: string; heredocs: PendingHeredoc[]; open: OpenQuote | undefined } {
   let code = ''
   const heredocs: PendingHeredoc[] = []
   /** Nesting depth of `$(( … ))` / `(( … ))`. */
@@ -180,10 +266,34 @@ function scanLine(line: string): { code: string; heredocs: PendingHeredoc[] } {
   let subst = 0
   /** Whether a `#` here would start a comment. */
   let atWordStart = true
+  /**
+   * Whether the previous character was an **unquoted** `$`, so a `'` here opens
+   * an ANSI-C run. Tracked rather than read back off the line, because
+   * `line.charAt(i - 1) === '$'` also fires on `echo \$'a\'` — where the `$` is a
+   * literal and the run is a plain single-quoted one that `\'` does *not* escape.
+   * Measured, that shorter form loses the checkpoint in `echo \$'a\'; ck real-id`.
+   */
+  let dollar = false
   let i = 0
+
+  if (carried !== undefined) {
+    // The line opens inside a quoted run, so its leading part is string content:
+    // it declares no checkpoint and — the unbounded half — opens no heredoc.
+    const close = closingQuote(line, 0, carried.quote, carried.ansiC)
+    if (close === -1) return { code: '', heredocs, open: carried }
+    // The delimiters stay for the same reason they do below: so nothing on either
+    // side of the run gets glued together.
+    code = carried.quote + carried.quote
+    atWordStart = false
+    i = close + 1
+  }
 
   while (i < line.length) {
     const ch = line.charAt(i)
+    // Every branch below consumes at least one character, so only the plain-text
+    // branch at the bottom can leave a `$` immediately behind us.
+    const afterDollar = dollar
+    dollar = false
 
     if (line.startsWith('$((', i) || line.startsWith('((', i)) {
       arith += 1
@@ -232,11 +342,10 @@ function scanLine(line: string): { code: string; heredocs: PendingHeredoc[] } {
 
     if (line.startsWith('<<', i)) {
       if (arith === 0) {
-        const m = HEREDOC_START.exec(line.slice(i))
-        const delim = m?.[3]
         // Every opener on the line, in order: `cat <<A <<B` has bodies for both,
         // and keeping only the first read `B`'s body as code.
-        if (delim !== undefined) heredocs.push({ delim, dash: m?.[1] === '-' })
+        const opened = heredocDelimiter(line.slice(i))
+        if (opened !== undefined) heredocs.push(opened)
       }
       code += ' '
       i += 2
@@ -254,7 +363,11 @@ function scanLine(line: string): { code: string; heredocs: PendingHeredoc[] } {
     }
 
     if (ch === "'" || ch === '"') {
-      const close = ch === '"' ? closingDoubleQuote(line, i) : line.indexOf(ch, i + 1)
+      // `$'…'` is a third quoting form and it honours `\'`, which a plain
+      // single-quoted run does not. Missing that closed the run one quote early
+      // and desynchronised the rest of the line: R1 through a third form.
+      const ansiC = ch === "'" && afterDollar
+      const close = closingQuote(line, i + 1, ch, ch === '"' || ansiC)
       const body = close === -1 ? line.slice(i + 1) : line.slice(i + 1, close)
       if (CK_BEFORE_QUOTE.test(code)) {
         // The id itself, and only the id: an id cannot contain a space or a
@@ -267,9 +380,9 @@ function scanLine(line: string): { code: string; heredocs: PendingHeredoc[] } {
         code += ch + ch
       }
       atWordStart = false
-      // An unclosed quote runs past the end of the line, so there is no more
-      // code on it - in bash's reading either.
-      if (close === -1) break
+      // An unclosed run does not end the string, it ends the *line*: bash keeps
+      // reading the next one as the same word, and so does the caller.
+      if (close === -1) return { code, heredocs, open: { quote: ch, ansiC } }
       i = close + 1
       continue
     }
@@ -281,32 +394,56 @@ function scanLine(line: string): { code: string; heredocs: PendingHeredoc[] } {
     code += ch
     i += 1
     atWordStart = WORD_BREAK.test(ch)
+    dollar = ch === '$'
   }
 
-  return { code, heredocs }
+  return { code, heredocs, open: undefined }
 }
 
 /**
- * The index of the `"` that closes the run opened at `open`, or -1. Bash pairs
- * quote characters *after* removing escaped ones, so `\"` is not a candidate.
+ * The index of the `quote` that closes the run, scanning from `from`, or -1.
+ *
+ * `escapes` is what separates the three quoting forms, and each setting is a
+ * measured requirement rather than a preference. Inside `"…"` bash pairs quote
+ * characters *after* removing escaped ones, so `\"` is not a candidate — pairing
+ * positionally left the walk running *inside* the string on the odd number of `"`
+ * that one `\"` in a description produces. Inside a plain `'…'` bash processes no
+ * escapes at all, so `'it\'` is a **complete** run and honouring `\'` there would
+ * lose the `ck` after it. Inside `$'…'` it does honour `\'`. Same scan, three
+ * answers; collapsing any two of them re-opens R1 in one direction or the other.
  */
-function closingDoubleQuote(line: string, open: number): number {
-  let i = open + 1
+function closingQuote(line: string, from: number, quote: string, escapes: boolean): number {
+  let i = from
   while (i < line.length) {
     const ch = line.charAt(i)
-    if (ch === '\\') {
+    if (escapes && ch === '\\') {
       i += 2
       continue
     }
-    if (ch === '"') return i
+    if (ch === quote) return i
     i += 1
   }
   return -1
 }
 
-export function countCheckpoints(gradeScript: string): number {
+/**
+ * The distinct checkpoint ids, sorted — the set `countCheckpoints` returns the
+ * size of. Exported for `test/server/checkpoint-oracle.ts`, which compares **id
+ * sets** against the ids real bash emits rather than the two cardinalities: a
+ * compensating pair, one phantom id gained while one real id is lost, leaves both
+ * counts equal and is invisible to a count comparison. Four of this function's
+ * six defects moved ids in both directions at once on some input, so that is not
+ * a theoretical hole.
+ */
+export function checkpointIds(gradeScript: string): string[] {
   const ids = new Set<string>()
   const pending: PendingHeredoc[] = []
+  /**
+   * The quoted run the previous line ended inside. It survives a heredoc body in
+   * between, which is bash's own order: `cat <<EOF; x="a` reads the body first and
+   * only then keeps reading the string.
+   */
+  let quoted: OpenQuote | undefined
 
   for (const raw of gradeScript.split('\n')) {
     const open = pending.at(0)
@@ -324,7 +461,8 @@ export function countCheckpoints(gradeScript: string): number {
     // A `ck` inside a heredoc body is text the grader prints, not a checkpoint
     // it runs: counting it inflates `expectedTotal` and reports a correct
     // solution as `incomplete`, which is a false *fail*.
-    const scanned = scanLine(raw)
+    const scanned = scanLine(raw, quoted)
+    quoted = scanned.open
     pending.push(...scanned.heredocs)
 
     for (const m of scanned.code.matchAll(CK_CALL)) {
@@ -333,7 +471,11 @@ export function countCheckpoints(gradeScript: string): number {
     }
   }
 
-  return ids.size
+  return [...ids].sort()
+}
+
+export function countCheckpoints(gradeScript: string): number {
+  return checkpointIds(gradeScript).length
 }
 
 export function maxRungFor(mode: SessionMode): Rung {
