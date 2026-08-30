@@ -1,7 +1,14 @@
+import { randomBytes } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
+import { connect as netConnect, type Socket } from 'node:net'
 import { describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
-import { attachTerminal, bridge, type PtyLike } from '../../src/server/terminal.ts'
+import {
+  attachTerminal,
+  bridge,
+  type PtyLike,
+  type TerminalDeps,
+} from '../../src/server/terminal.ts'
 import type { VmConfig } from '../../src/engine/vm/config.ts'
 
 function fakePty() {
@@ -110,29 +117,64 @@ const CFG = {
  */
 async function withServer(
   allowedOrigins: ReadonlySet<string>,
-  fn: (port: number, spawned: Array<[number, number]>) => Promise<void>,
+  fn: (port: number, spawned: Array<[number, number]>, kills: () => number) => Promise<void>,
+  over: { cfg?: VmConfig; realPty?: boolean } = {},
 ): Promise<void> {
   const spawned: Array<[number, number]> = []
+  let kills = 0
   const server: Server = createServer()
-  const wss = attachTerminal(server, {
-    cfg: CFG,
-    allowedOrigins,
-    spawnPty: (_cfg, cols, rows) => {
+  const deps: TerminalDeps = { cfg: over.cfg ?? CFG, allowedOrigins }
+  // `realPty` runs the production `spawnSshPipe`, which is the only way to
+  // exercise the throw `sshArgs` raises on a config with no IP. It spawns
+  // nothing: the throw happens before `spawn`.
+  if (over.realPty !== true) {
+    deps.spawnPty = (_cfg, cols, rows) => {
       spawned.push([cols, rows])
-      return fakePty().pty
-    },
-  })
+      return {
+        ...fakePty().pty,
+        kill: () => {
+          kills += 1
+        },
+      }
+    }
+  }
+  const wss = attachTerminal(server, deps)
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const addr = server.address()
   const port = typeof addr === 'object' && addr !== null ? addr.port : 0
 
   try {
-    await fn(port, spawned)
+    await fn(port, spawned, () => kills)
   } finally {
     wss.close()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   }
+}
+
+/**
+ * A real handshake over a raw socket, so a test can send a frame the `ws`
+ * client would never produce. Resolves once the server has answered 101.
+ */
+function rawUpgrade(port: number): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const sock = netConnect(port, '127.0.0.1', () => {
+      sock.write(
+        'GET /ws/terminal HTTP/1.1\r\n' +
+          `Host: 127.0.0.1:${port}\r\n` +
+          'Upgrade: websocket\r\n' +
+          'Connection: Upgrade\r\n' +
+          `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n` +
+          'Sec-WebSocket-Version: 13\r\n\r\n',
+      )
+    })
+    sock.on('error', reject)
+    sock.once('data', (buf: Buffer) => {
+      const head = buf.toString('latin1')
+      if (head.startsWith('HTTP/1.1 101')) resolve(sock)
+      else reject(new Error(`handshake failed: ${head.split('\r\n')[0]}`))
+    })
+  })
 }
 
 /** Resolves 'open' if the upgrade succeeded, 'refused' if the socket died. */
@@ -189,5 +231,57 @@ describe('attachTerminal', () => {
       expect(await connect(port, '/ws/nope')).toBe('refused')
       expect(spawned).toEqual([])
     })
+  })
+
+  it('survives a malformed frame, killing the shell and not the process', async () => {
+    // Seven bytes with RSV1 set. `ws` reports a protocol error on the socket,
+    // and with no 'error' listener that is an unhandled 'error' event: the
+    // process exits and takes grading, sessions and the whole in-memory store
+    // with it. `bridge` already says a malformed frame is not worth ending a
+    // lab session over; this is the layer below it saying the same thing.
+    await withServer(ALLOWED, async (port, spawned, kills) => {
+      const sock = await rawUpgrade(port)
+      expect(spawned).toHaveLength(1)
+
+      const closed = new Promise<void>((resolve) => sock.on('close', () => resolve()))
+      sock.write(Buffer.from([0xc1, 0x81, 0x00, 0x00, 0x00, 0x00, 0x61]))
+      await closed
+
+      // The shell behind the bad socket is gone...
+      expect(kills()).toBeGreaterThanOrEqual(1)
+      // ...and the server is still here to serve the next one.
+      expect(await connect(port, '/ws/terminal')).toBe('open')
+      expect(spawned).toHaveLength(2)
+    })
+  })
+
+  it('tells the client why the terminal cannot start instead of taking the API down', async () => {
+    // `chooseTransport` falling back to vmrun is a supported setup, and there
+    // `cfg.ip` is empty - so `sshArgs` throws inside handleUpgrade's callback,
+    // which is on no promise chain. The endpoint stays attached and fails per
+    // connection, because Task 24 renders the tab either way and a tab that
+    // explains itself beats a tab that 404s. The message has to arrive over the
+    // socket: the student is looking at the tab, not at the server's stderr.
+    const noIp = { ...CFG, ip: '' } satisfies VmConfig
+    await withServer(
+      ALLOWED,
+      async (port) => {
+        const seen: string[] = []
+        const code = await new Promise<number>((resolve) => {
+          const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/terminal`)
+          ws.on('message', (d) => seen.push(d.toString()))
+          ws.on('close', (c: number) => resolve(c))
+          ws.on('error', () => resolve(-1))
+        })
+
+        expect(seen.join('')).toMatch(/RHCSA_VM_IP/)
+        expect(code).toBe(1011)
+        // The handshake itself succeeds - that is what "attach and fail per
+        // connection" means - and the endpoint is still there for the next
+        // attempt rather than having ended the process on this one.
+        expect(await connect(port, '/ws/terminal')).toBe('open')
+      },
+      { cfg: noIp, realPty: true },
+    )
   })
 })

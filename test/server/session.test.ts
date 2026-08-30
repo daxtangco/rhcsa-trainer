@@ -64,6 +64,44 @@ describe('countCheckpoints', () => {
     expect(countCheckpoints(GRADE_BRANCHED)).toBe(3)
   })
 
+  it('sees a ck that follows a command separator, which is what assert.sh documents', () => {
+    // `content/lib/assert.sh:60` teaches `some_condition; ck my-id "…" $?`. The
+    // counter used to allow only whitespace before `ck`, so a grader written to
+    // the library's own documentation declared fewer checkpoints than it has -
+    // and `expectedTotal` then matched a truncated run, turning mandate 7's
+    // guard off for exactly the authoring style the project ships.
+    expect(countCheckpoints('test -f /etc/fstab; ck gamma "d" $?\n')).toBe(1)
+    expect(countCheckpoints('true && ck delta "d" $?\n')).toBe(1)
+    expect(countCheckpoints('false || ck zeta "d" $?\n')).toBe(1)
+    expect(countCheckpoints('grep -q x /f | ck epsilon "d" $?\n')).toBe(1)
+    // One of each in one script, which is the shape a real grader would have.
+    expect(countCheckpoints('ck one "d" $?\nfalse; ck two "d" $?\n')).toBe(2)
+  })
+
+  it('still ignores a ck in a comment or inside a string', () => {
+    // Both measured and both genuinely right before the separator change, which
+    // is why they are pinned: allowing `; ck` is one comment-strip away from
+    // counting assert.sh's own usage line.
+    expect(countCheckpoints('# ck nope "d" $?\nck real "d" $?\n')).toBe(1)
+    expect(countCheckpoints('ck real "d" $?   # ck nope "d" $?\n')).toBe(1)
+    expect(
+      countCheckpoints('# Usage:  some_condition; ck my-id "what was checked" $? "what"\n'),
+    ).toBe(0)
+    expect(countCheckpoints('printf "run ck now"\nck real "d" $?\n')).toBe(1)
+    expect(countCheckpoints('echo "ck_pass fake-id"\nck real "d" $?\n')).toBe(1)
+  })
+
+  it('does not count a ck inside a heredoc body', () => {
+    // The over-count direction, and the only one that produces a false *fail*:
+    // a checkpoint that is printed rather than run inflates `expectedTotal`, so
+    // a complete run is reported `incomplete` and a correct solution fails.
+    expect(countCheckpoints('cat <<\'EOF\'\nck heredoc-id "x" $?\nEOF\nck real "y" $?\n')).toBe(1)
+    expect(countCheckpoints('cat <<EOF\nck heredoc-id "x" $?\nEOF\nck real "y" $?\n')).toBe(1)
+    expect(countCheckpoints('cat <<-EOF\n\tck heredoc-id "x" $?\n\tEOF\nck real "y" $?\n')).toBe(1)
+    // `<<<` is a herestring: it opens nothing, so the next line still counts.
+    expect(countCheckpoints('grep -q x <<<WORD\nck real "y" $?\n')).toBe(1)
+  })
+
   it('finds no checkpoints in the assertion library that gets prepended to every grader', async () => {
     // loadTaskScripts hands `assertLib + grade.sh` to countCheckpoints, so an
     // example `ck` call in a comment-free line of assert.sh would inflate the
@@ -166,6 +204,44 @@ describe('reportFor', () => {
     expect(r.expectedTotal).toBe(5)
     expect(r.incomplete).toBe(true)
     expect(r.allPassed).toBe(false)
+  })
+
+  it('refuses to call a run that emitted one id twice a pass', () => {
+    // Mandate 7's bug through the other door. Three lines arrived and three
+    // were declared, so a comparison of *lines* to *ids* said complete - while
+    // the third checkpoint never ran, because the second line was a repeat.
+    // `total`, `passed` and the guard all have to speak the same unit.
+    const dupe = parseVerdict(
+      [
+        '{"id":"fstab-entry","desc":"x","status":"pass"}',
+        '{"id":"mount-present","desc":"y","status":"pass"}',
+        '{"id":"fstab-entry","desc":"x","status":"pass"}',
+      ].join('\n'),
+    )
+    const r = reportFor('practice', result({ verdictA: dupe }), false, 3)
+
+    expect(r.total).toBe(2)
+    expect(r.passed).toBe(2)
+    expect(r.expectedTotal).toBe(3)
+    expect(r.incomplete).toBe(true)
+    expect(r.allPassed).toBe(false)
+    // And the list the client renders is one row per id, so it cannot disagree
+    // with `total` in front of the student.
+    expect(r.checkpoints?.map((c) => c.id)).toEqual(['fstab-entry', 'mount-present'])
+  })
+
+  it('does not let a repeated id inflate the passed count', () => {
+    const dupe = parseVerdict(
+      [
+        '{"id":"lv-home-size","desc":"x","status":"pass"}',
+        '{"id":"lv-home-size","desc":"x","status":"pass"}',
+        '{"id":"fs-home-size","desc":"y","status":"fail"}',
+      ].join('\n'),
+    )
+    const r = reportFor('practice', result({ verdictA: dupe }), false, 2)
+    expect(r.passed).toBe(1)
+    expect(r.total).toBe(2)
+    expect(r.incomplete).toBe(false)
   })
 
   it('calls a full verdict complete', () => {

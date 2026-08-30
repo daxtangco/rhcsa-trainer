@@ -103,10 +103,12 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * correct, because nothing about a response body is known at compile time — so
  * these four helpers exist to read it without an `as` cast.
  *
- * A wrong *path* throws, naming the key and what was there instead; a missing
- * *leaf* returns undefined, because "this field is absent" is something several
- * tests assert (masking). The distinction matters: a renamed field must fail the
- * test that reads it, not quietly compare undefined to undefined.
+ * A missing key at **any** depth returns `undefined`; a type mismatch throws,
+ * naming the key and what was there instead. Measured, not assumed: a typo in an
+ * intermediate key returns `undefined` and abandons the rest of the path, so
+ * `at(...)` alone cannot prove a field is absent rather than mistyped. Use
+ * `expectMissing` for that, and `items`/`str`/`num` everywhere else - they throw
+ * on the wrong runtime type, which is what gives the other assertions teeth.
  */
 function at(root: unknown, ...path: Array<string | number>): unknown {
   let cur: unknown = root
@@ -124,6 +126,25 @@ function at(root: unknown, ...path: Array<string | number>): unknown {
     throw new Error(`cannot read ${JSON.stringify(key)} of ${JSON.stringify(cur)}`)
   }
   return cur
+}
+
+/**
+ * Assert a field is absent *from a container that exists*. `at()` returns
+ * `undefined` for a missing key at any depth, so `expect(at(x, 'a', 'b'))
+ * .toBeUndefined()` also passes when `a` was renamed - it would report masking
+ * that is no longer happening. This checks the parent first.
+ */
+function expectMissing(root: unknown, ...path: Array<string | number>): void {
+  const key = path.at(-1)
+  if (key === undefined) throw new Error('expectMissing needs at least one key')
+  const parentPath = path.slice(0, -1)
+  const parent = at(root, ...parentPath)
+  if (!isRecord(parent)) {
+    throw new Error(
+      `expected a record at ${parentPath.join('.') || '<root>'}, got ${JSON.stringify(parent)}`,
+    )
+  }
+  expect(Object.keys(parent)).not.toContain(String(key))
 }
 
 function items(root: unknown, ...path: Array<string | number>): unknown[] {
@@ -212,7 +233,7 @@ describe('GET /api/tasks', () => {
     expect(items(body, 'tasks')).toHaveLength(2)
     expect(at(body, 'tasks', 0, 'id')).toBe('storage/014-grow-home-lv')
     // The list is for choosing; the prompt belongs to a session.
-    expect(at(body, 'tasks', 0, 'prompt')).toBeUndefined()
+    expectMissing(body, 'tasks', 0, 'prompt')
   })
 })
 
@@ -280,6 +301,39 @@ describe('POST /api/sessions', () => {
     })
     expect(res.status).toBe(400)
     expect(str(await res.json(), 'error')).toMatch(/mode/)
+  })
+
+  it('blames the body, not the task, when the body is not a JSON object', async () => {
+    // Every one of these used to answer `unknown task: undefined`, which sends
+    // the reader looking for a task id they never sent.
+    const { a } = app()
+    const headers = { 'content-type': 'application/json' }
+    for (const body of ['not json', '[]', 'null', '"hello"']) {
+      const res = await a.request('/api/sessions', { method: 'POST', body, headers })
+      expect(res.status).toBe(400)
+      expect(str(await res.json(), 'error')).toMatch(/body must be a JSON object/)
+    }
+    const empty = await a.request('/api/sessions', { method: 'POST', headers })
+    expect(empty.status).toBe(400)
+    expect(str(await empty.json(), 'error')).toMatch(/body must be a JSON object/)
+
+    // An object that names no task is a different problem, and says so.
+    const noTask = await a.request('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'exam' }),
+      headers,
+    })
+    expect(noTask.status).toBe(400)
+    expect(str(await noTask.json(), 'error')).toMatch(/taskId/)
+
+    // A task id that is a string but not in the bank still reports the id.
+    const unknown = await a.request('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: 'storage/nope', mode: 'exam' }),
+      headers,
+    })
+    expect(unknown.status).toBe(400)
+    expect(str(await unknown.json(), 'error')).toMatch(/unknown task: storage\/nope/)
   })
 
   it('500s with the setup output when setup fails', async () => {
@@ -372,7 +426,7 @@ describe('grading and finishing', () => {
     const graded = await (await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })).json()
     expect(at(graded, 'passed')).toBe(1)
     expect(at(graded, 'total')).toBe(2)
-    expect(at(graded, 'checkpoints')).toBeUndefined()
+    expectMissing(graded, 'checkpoints')
     expect(at(graded, 'phase')).toBe('active')
 
     const done = await (await a.request(`/api/sessions/${id}/finish`, { method: 'POST' })).json()
@@ -396,6 +450,39 @@ describe('grading and finishing', () => {
     // The truncation guard travels to the client, so Task 24 can render it.
     expect(at(graded, 'expectedTotal')).toBe(2)
     expect(at(graded, 'incomplete')).toBe(false)
+  })
+
+  it('refuses to grade or finish a session that is already finished', async () => {
+    // The measured laundering sequence, in exam mode: grade, finish early to
+    // learn *which* checkpoints failed, fix exactly those, grade again, finish
+    // again - and collect `rating: 'easy'` for an attempt that used the key the
+    // first finish handed over. Finishing is what unmasks, so it has to be
+    // terminal and it has to happen once.
+    const { a } = app()
+    const id = await start(a, 'exam')
+
+    await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })
+    const first = await a.request(`/api/sessions/${id}/finish`, { method: 'POST' })
+    expect(first.status).toBe(200)
+    const done = await first.json()
+    const endedAt = num(done, 'endedAt')
+    expect(at(done, 'rating')).toBe('hard')
+
+    const regrade = await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })
+    expect(regrade.status).toBe(409)
+    expect(str(await regrade.json(), 'error')).toMatch(/finished/)
+
+    const refinish = await a.request(`/api/sessions/${id}/finish`, { method: 'POST' })
+    expect(refinish.status).toBe(409)
+    const refused = await refinish.json()
+    expect(str(refused, 'error')).toMatch(/already finished/)
+    // No second rating was derived, not even a null one.
+    expectMissing(refused, 'rating')
+
+    // And the attempt that was recorded is the one that happened.
+    const after = await (await a.request(`/api/sessions/${id}`)).json()
+    expect(num(after, 'endedAt')).toBe(endedAt)
+    expect(at(after, 'phase')).toBe('graded')
   })
 
   it('409s on finish before anything was graded', async () => {

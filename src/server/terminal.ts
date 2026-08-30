@@ -82,6 +82,22 @@ export function spawnSshPipe(cfg: VmConfig, cols: number, rows: number): PtyLike
     stdio: ['pipe', 'pipe', 'pipe'],
   })
 
+  let onData: (data: string) => void = () => {}
+  let onExit: (code: number) => void = () => {}
+
+  // A spawn failure - no `ssh` on PATH - emits 'error' and never 'exit'. With
+  // no listener that is an unhandled 'error' event, which ends the whole
+  // process: the first terminal click takes grading and every open session down
+  // with it. Report it into the terminal instead, then end this pty only.
+  child.on('error', (e: Error) => {
+    onData(`\r\n[terminal] ssh could not start: ${e.message}\r\n`)
+    onExit(1)
+  })
+  // Same reasoning one layer down: once the guest side is gone, the next
+  // keystroke writes to a closed pipe and the stream emits EPIPE. A dropped
+  // keystroke is the correct outcome; a dead API is not.
+  child.stdin.on('error', () => {})
+
   return {
     write: (d) => void child.stdin.write(d),
     resize: () => {
@@ -90,14 +106,26 @@ export function spawnSshPipe(cfg: VmConfig, cols: number, rows: number): PtyLike
     },
     kill: () => void child.kill(),
     onData: (cb) => {
+      onData = cb
       child.stdout.setEncoding('utf8')
       child.stderr.setEncoding('utf8')
       child.stdout.on('data', cb)
       child.stderr.on('data', cb)
     },
-    onExit: (cb) => child.on('exit', (code) => cb(code ?? 0)),
+    onExit: (cb) => {
+      onExit = cb
+      child.on('exit', (code) => cb(code ?? 0))
+    },
   }
 }
+
+/**
+ * How often to ping an idle terminal, and how long a socket has to answer.
+ * A connection that dies without FIN or RST - a closed laptop, a NAT timeout -
+ * otherwise leaves `ssh -tt` and a guest PTY alive indefinitely, and this is a
+ * tool that runs on one laptop next to the VM it drives.
+ */
+const HEARTBEAT_MS = 30_000
 
 export interface TerminalDeps {
   cfg: VmConfig
@@ -116,6 +144,11 @@ export function attachTerminal(server: Server, deps: TerminalDeps): WebSocketSer
   const wss = new WebSocketServer({ noServer: true })
   const spawnPty = deps.spawnPty ?? spawnSshPipe
 
+  // This listener owns every upgrade the server receives: anything that is not
+  // /ws/terminal is destroyed below. A second WebSocket endpoint added later
+  // cannot simply call `server.on('upgrade')` too - its handshakes would be
+  // destroyed by this one - so the two would have to share one listener that
+  // dispatches on pathname.
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
 
@@ -140,15 +173,58 @@ export function attachTerminal(server: Server, deps: TerminalDeps): WebSocketSer
     const rows = Number(url.searchParams.get('rows') ?? 30) || 30
 
     wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
-      const pty = spawnPty(deps.cfg, cols, rows)
-      const b = bridge(pty, {
-        send: (d) => {
-          if (ws.readyState === ws.OPEN) ws.send(d)
-        },
-        close: () => ws.close(),
-      })
+      const send = (d: string) => {
+        if (ws.readyState === ws.OPEN) ws.send(d)
+      }
+
+      let pty: PtyLike
+      try {
+        pty = spawnPty(deps.cfg, cols, rows)
+      } catch (e) {
+        // `sshArgs` throws whenever `cfg.ip` is empty, which is exactly the
+        // supported vmrun setup - and this callback is not on any promise
+        // chain, so an escaping throw ends the process. The student is looking
+        // at a terminal tab, not at the server's stderr, so the reason has to
+        // arrive over the socket before it closes.
+        send(`\r\n[terminal] cannot start: ${e instanceof Error ? e.message : String(e)}\r\n`)
+        ws.close(1011, 'terminal unavailable')
+        return
+      }
+
+      const b = bridge(pty, { send, close: () => ws.close() })
       ws.on('message', (data) => b.onMessage(data.toString()))
-      ws.on('close', () => b.onClose())
+
+      // A malformed *frame* - as opposed to malformed JSON inside a valid one,
+      // which `bridge` already swallows - makes `ws` emit 'error'. With no
+      // listener that is an unhandled 'error' event and the process exits,
+      // taking every session with it. Same policy as `bridge`: one bad frame
+      // ends this terminal, not the trainer.
+      ws.on('error', (e: Error) => {
+        console.error(`[terminal] socket error, ending this terminal: ${e.message}`)
+        b.onClose()
+      })
+
+      // Liveness, not politeness: `ws` answers a ping itself, so a socket that
+      // misses a pong is one whose peer is gone without having said so.
+      let alive = true
+      ws.on('pong', () => {
+        alive = true
+      })
+      const beat = setInterval(() => {
+        if (!alive) {
+          ws.terminate()
+          return
+        }
+        alive = false
+        ws.ping()
+      }, HEARTBEAT_MS)
+      // An open terminal must not be the reason the process cannot exit.
+      beat.unref()
+
+      ws.on('close', () => {
+        clearInterval(beat)
+        b.onClose()
+      })
     })
   })
 

@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { commandSketch, rungContent, type RungContext } from '../../src/engine/disclosure/content.ts'
 import type { ConceptSpec } from '../../src/engine/content/concept.ts'
@@ -98,6 +100,11 @@ describe('commandSketch', () => {
   it('does not tear a sed expression apart on its | delimiters', () => {
     // The real solutions/02-lvextend-r-by-uuid.sh line. Splitting on `|`
     // yielded 'home[[:space:]]' and "d'" as things to read the man page for.
+    //
+    // This line alone does not prove the mechanism: every fragment of it
+    // contains a `[` or a `'`, so COMMAND_SHAPE would reject them wherever the
+    // walk stopped. The two tests below carry that weight, with expressions
+    // whose fragments are ordinary words.
     const line = "sudo sed -i '\\|[[:space:]]/home[[:space:]]|d' /etc/fstab\n"
     const s = commandSketch(line)
     expect(s).toEqual(['sed'])
@@ -105,6 +112,65 @@ describe('commandSketch', () => {
       expect(cmd).not.toContain('[')
       expect(cmd).not.toContain("'")
     }
+  })
+
+  it('emits no word from inside a quoted run, even when the words look like commands', () => {
+    // The real selinux/019 line, and the reason the claim "neither can leak an
+    // argument" was false: splitting on `|` made pseudo-segments whose first
+    // word was `Listen`, and the stop-at-the-command-position rule then emitted
+    // it - the two httpd directives the task is about, under a heading that
+    // promises arguments are omitted, followed by "read the man page".
+    const s = commandSketch(
+      "sudo sed -i 's|^Listen 80$|Listen 82|' /etc/httpd/conf/httpd.conf\n" +
+        'sudo sed -i \'s|^DocumentRoot "/var/www/html"|DocumentRoot "/srv/web"|\' /etc/httpd/conf/httpd.conf\n',
+    )
+    expect(s).toEqual(['sed'])
+  })
+
+  it('emits nothing from a quoted alternation or a quoted device name', () => {
+    expect(commandSketch("grep -E 'foo|bar' /etc/hosts\n")).toEqual(['grep'])
+    expect(commandSketch("sudo parted -s /dev/sdb print 'sdb1' 'sdb2'\n")).toEqual(['parted'])
+  })
+
+  it('treats << as a heredoc only where it is really one', () => {
+    // HEREDOC_START used to be matched against the whole line, so any of these
+    // put the walk into heredoc mode and silently discarded every following
+    // line of the solution - a two-command sketch for a ten-command task.
+    expect(commandSketch('grep -q x <<<WORD\nsudo blkid\n')).toEqual(['grep', 'blkid'])
+    expect(commandSketch('echo "shift a << b"\nsudo blkid\n')).toEqual(['echo', 'blkid'])
+    expect(commandSketch('blkid # see << EOF note\nsudo lvs\n')).toEqual(['blkid', 'lvs'])
+    expect(commandSketch("printf 'usage <<HELP'\nsudo lvs\n")).toEqual(['printf', 'lvs'])
+  })
+
+  it('keeps skipping a real heredoc body, quoted delimiter or not', () => {
+    const body = '[Unit]\nDescription=nope\n'
+    expect(commandSketch(`sudo tee /etc/x >/dev/null <<'EOF'\n${body}EOF\nsudo lvs\n`)).toEqual([
+      'tee',
+      'lvs',
+    ])
+    expect(commandSketch(`sudo tee /etc/x <<EOF\n${body}EOF\nsudo lvs\n`)).toEqual(['tee', 'lvs'])
+  })
+
+  it('has these residuals, deliberately', () => {
+    // Pinned rather than fixed: each needs a real shell parser, each is either
+    // noise in a hint or under-disclosure that rung 5 covers, and pinning them
+    // means a future rewrite has to notice it changed them.
+    //
+    // An *unquoted* delimiter still leaks one word.
+    expect(commandSketch('sed -i s\\|a\\|b\\| /etc/hosts\n')).toEqual(['sed', 'hosts'])
+    // A first word that is not a command shape stops the line dead.
+    expect(commandSketch('$EDITOR /etc/fstab\n')).toEqual([])
+    expect(commandSketch('> /etc/motd echo hi\n')).toEqual([])
+    // A case block emits one word per pattern label, not just the first.
+    expect(commandSketch('case $x in\n  a) echo one ;;\n  b) echo two ;;\nesac\n')).toEqual([
+      'a',
+      'echo',
+      'b',
+    ])
+    // A command substitution inside double quotes goes with the quoted run.
+    expect(commandSketch('sudo nmcli connection modify "$(cat /etc/rhcsa-conn)" yes\n')).toEqual([
+      'nmcli',
+    ])
   })
 
   it('does not present ]] as a command', () => {
@@ -119,6 +185,46 @@ describe('commandSketch', () => {
     const s = commandSketch('if [ -f /etc/fstab ]; then\n  cat /etc/fstab\nfi\n')
     expect(s).not.toContain('fstab')
     expect(s).toContain('cat')
+  })
+})
+
+describe('commandSketch over the real bank', () => {
+  /** Read-only. Nothing under content/ is written by this suite. */
+  async function solution(relative: string): Promise<string> {
+    return await readFile(fileURLToPath(new URL(`../../content/${relative}`, import.meta.url)), 'utf8')
+  }
+
+  it('does not hand rung 4 the two httpd directives selinux/019 is about', async () => {
+    // This is the assertion whose absence let the leak look fixed: the mandate
+    // was checked against a synthetic fixture while the file that defeats it
+    // sat in the repo. `loadTaskScripts` sorts fixture names, so solution 01 is
+    // the one rung 4 renders.
+    const s = commandSketch(
+      await solution('tasks/selinux/019-httpd-alt-port/solutions/01-semanage-fcontext-type.sh'),
+    )
+    expect(s).not.toContain('Listen')
+    expect(s).not.toContain('DocumentRoot')
+    // No word from a config file's directives, generalised: the leak's
+    // signature was a capitalised argument presented as a command.
+    for (const cmd of s) expect(cmd).toMatch(/^[a-z]/)
+    // Still a useful sketch, not an empty one bought by over-stripping.
+    expect(s).toContain('sed')
+    expect(s).toContain('semanage')
+    expect(s).toContain('restorecon')
+    expect(s).toContain('firewall-cmd')
+  })
+
+  it('still sketches the other real solutions it is rendered from', async () => {
+    expect(
+      commandSketch(await solution('tasks/storage/014-grow-home-lv/solutions/01-lvextend-then-growfs.sh')),
+    ).toEqual(['lvextend', 'xfs_growfs'])
+    expect(
+      commandSketch(await solution('tasks/users/006-team-provisioning/solutions/01-useradd-usermod-chage.sh')),
+    ).toContain('useradd')
+    // A heredoc body in a real solution, not a fixture of one.
+    expect(
+      commandSketch(await solution('tasks/systemd/017-boot-time-service/solutions/01-oneshot-multiuser.sh')),
+    ).toEqual(['tee', 'systemctl'])
   })
 })
 

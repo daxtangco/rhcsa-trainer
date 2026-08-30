@@ -62,7 +62,7 @@ const NOISE = new Set([
   ')',
 ])
 
-const HEREDOC_START = /<<-?\s*'?"?([A-Za-z_][A-Za-z0-9_]*)'?"?/
+const HEREDOC_START = /^<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
 
 /**
@@ -73,6 +73,65 @@ const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
 const COMMAND_SHAPE = /^[A-Za-z_][A-Za-z0-9_.+-]*$/
 
 /**
+ * What the splitter is allowed to look at, plus the heredoc the line opens.
+ *
+ * A quoted run keeps its quotes and loses its contents, because its contents
+ * are arguments. `sudo sed -i 's|^Listen 80$|Listen 82|' …` used to be split on
+ * the `|`s *inside* the expression, and the first word of one of the resulting
+ * pseudo-segments was `Listen` — an httpd directive handed to the student as
+ * something to read the man page for, under a heading promising that arguments
+ * are omitted. `''` cannot match `COMMAND_SHAPE`, so a stripped run now stops
+ * the walk instead of feeding it.
+ *
+ * `<<` opens a heredoc only where it is really a heredoc: not inside a quoted
+ * run, not after a `#`, and not part of a `<<<` herestring. Matched against the
+ * whole line, all three silently discarded every remaining line of the solution
+ * (`grep -q x <<<WORD` rendered a two-command sketch for a ten-command task).
+ */
+function scanLine(line: string): { code: string; heredoc?: string } {
+  let code = ''
+  let heredoc: string | undefined
+  let i = 0
+
+  while (i < line.length) {
+    const ch = line.charAt(i)
+
+    if (ch === "'" || ch === '"') {
+      code += ch + ch
+      const close = line.indexOf(ch, i + 1)
+      // An unclosed quote runs to end of line. Fail closed: under-disclose
+      // rather than guess where the author meant it to end.
+      if (close === -1) break
+      i = close + 1
+      continue
+    }
+
+    // A `#` starts a comment only at the start of a word, so `${x#/}` survives.
+    if (ch === '#' && (i === 0 || /[ \t]/.test(line.charAt(i - 1)))) break
+
+    if (line.startsWith('<<<', i)) {
+      // A herestring feeds one word to stdin. It opens nothing.
+      code += ' '
+      i += 3
+      continue
+    }
+
+    if (line.startsWith('<<', i)) {
+      const m = HEREDOC_START.exec(line.slice(i))
+      if (heredoc === undefined && m?.[2] !== undefined) heredoc = m[2]
+      code += ' '
+      i += 2
+      continue
+    }
+
+    code += ch
+    i += 1
+  }
+
+  return { code, heredoc }
+}
+
+/**
  * The commands a solution runs, in order, once each, stripped of arguments.
  *
  * This is rung 4 of the disclosure ladder. It is derived from the solution
@@ -81,14 +140,25 @@ const COMMAND_SHAPE = /^[A-Za-z_][A-Za-z0-9_.+-]*$/
  * covers prose.
  *
  * **This is a hint, not a spec.** It is a line-by-line heuristic, not a shell
- * parser, and two limits survive on purpose because fixing them needs a real
- * parser and rung 4 is not worth one:
+ * parser. `scanLine` strips quoted runs first, so the argument text inside them
+ * cannot reach the command position — but "no argument can ever leak" is more
+ * than this can promise, and claiming it once hid a real leak. What survives, on
+ * purpose, because fixing it needs a real parser and rung 4 is not worth one:
  *
- * - `for u in alice bob` emits the loop variable `u`.
- * - a `case` pattern label emits (`a)` yields `a`).
+ * - `for u in alice bob` emits the loop variable `u`, and a `case` block emits
+ *   one word per pattern label (`a)` yields `a`). Harmless noise in a hint.
+ * - an **unquoted** delimiter still leaks one word: `sed -i s\|a\|b\| /etc/hosts`
+ *   emits `hosts`. Left alone deliberately — every solution in the bank quotes
+ *   its `sed` expressions, and quoting them is the authoring convention.
+ * - three shapes emit nothing rather than too much, which rung 5 covers: a first
+ *   word that is a variable expansion (`$EDITOR /etc/fstab` → `[]`), a leading
+ *   redirect (`> /etc/motd echo hi` → `[]`), and a command substitution inside
+ *   double quotes, which goes with the quoted run it sits in. That last one is
+ *   live: `nmcli … "$(cat /etc/rhcsa-conn)"` in troubleshooting/028's first
+ *   solution no longer contributes `cat`. Losing an incidental `cat` is the
+ *   price of not handing over `Listen` and `DocumentRoot`.
  *
- * Both are harmless noise in a hint and neither can leak an argument. The
- * authoring convention that follows: a task's **first** solution should be
+ * The authoring convention that follows: a task's **first** solution should be
  * written as straight-line commands, because `loadTaskScripts` sorts fixture
  * names and rung 4 uses the first solution it finds.
  */
@@ -109,14 +179,14 @@ export function commandSketch(solution: string): string[] {
     // `set -euo pipefail` is boilerplate, and none of its words is a command.
     if (/^set\s/.test(line)) continue
 
-    const started = HEREDOC_START.exec(line)
-    if (started?.[1] !== undefined) heredoc = started[1]
+    const scanned = scanLine(line)
+    if (scanned.heredoc !== undefined) heredoc = scanned.heredoc
 
     // Split on everything that can introduce a new command, so a pipeline and
-    // a command substitution both contribute. This also tears apart a `sed`
-    // expression that uses `|` as its delimiter, which is exactly why the walk
-    // below must stop at the command position rather than search past it.
-    for (const seg of line.split(/\$\(|\)|`|\|\||&&|[|;]/)) {
+    // a command substitution both contribute. A `sed` expression that uses `|`
+    // as its delimiter is quoted, and `scanLine` has already emptied it, so
+    // there is nothing left inside it to split on or to emit.
+    for (const seg of scanned.code.split(/\$\(|\)|`|\|\||&&|[|;]/)) {
       const words = seg.trim().split(/\s+/).filter((w) => w !== '')
       for (const w of words) {
         // Only noise and variable assignments may be skipped: `sudo`, `if` and
@@ -157,6 +227,10 @@ export function rungContent(rung: Rung, ctx: RungContext): RungContent {
     }
 
     case 3:
+      // The ladder decides when the *hint endpoint* assembles these cards, not
+      // whether the student can read one: `GET /api/concepts/:id` serves the
+      // same bodies ungated, by design (see MAX_RUNG). This rung is the
+      // convenience of getting exactly the task's cards in one response.
       return {
         rung,
         kind: 'concepts',

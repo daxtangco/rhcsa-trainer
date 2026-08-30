@@ -8,6 +8,13 @@ export type Rung = 1 | 2 | 3 | 4 | 5
 
 /**
  * 1 cold, 2 nudge, 3 concept card, 4 command sketch, 5 narrated solution.
+ *
+ * What a cap governs is **what the hint endpoint hands you when you ask for
+ * it**, not what the app contains. The concept library behind rung 3 is served
+ * ungated by `GET /api/concepts/:id` on purpose: this app is meant to replace
+ * the book, and a reference you may only reach by failing a hint ladder is a
+ * worse book. Exam realism for cards is a UI affordance — the session view must
+ * not offer card links in exam mode — not an API gate.
  */
 export const MAX_RUNG: Record<LadderMode, Rung> = {
   practice: 5,

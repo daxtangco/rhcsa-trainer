@@ -6,7 +6,7 @@ import {
   type Rung,
 } from '../engine/disclosure/ladder.ts'
 import { finalVerdict, type GradeResult } from '../engine/grading/grader.ts'
-import { allPassed, type CheckpointStatus } from '../engine/grading/verdict.ts'
+import { allPassed, statusById, type CheckpointStatus } from '../engine/grading/verdict.ts'
 
 export type SessionMode = 'guided' | LadderMode
 export type SessionPhase = 'active' | 'graded'
@@ -30,11 +30,57 @@ export interface SessionRecord {
  * routinely emitted from several branches of an if/else — so this counts
  * distinct ids, not call sites. Task 22's authoring rule is what makes it
  * possible: every id is a literal, never a variable.
+ *
+ * A `ck` may begin its line or follow a command separator, because
+ * `content/lib/assert.sh` documents `some_condition; ck my-id "…" $?` as *the*
+ * usage — and a checkpoint this counter cannot see is a checkpoint the
+ * `incomplete` guard below stops defending. It is deliberately blind to a `ck`
+ * in a comment (stripped before matching) and, in practice, to the word `ck`
+ * inside a string, since no separator precedes it there.
+ *
+ * Known misses, all fail-*open* in the counting direction (they under-count, so
+ * `incomplete` under-fires) and none of them used by any grader in the bank: a
+ * `ck` after `then`, `do`, `else`, `{`, `(` or a line continuation, and an id
+ * that breaks the `[a-z0-9-]` convention (`ck my_id` counts as `my`).
  */
-const CK_CALL = /^[ \t]*ck(?:_pass|_fail|_skip)?[ \t]+["']?([a-z0-9][a-z0-9-]*)/gm
+const CK_CALL = /(?:^[ \t]*|[;&|][ \t]*)ck(?:_pass|_fail|_skip)?[ \t]+["']?([a-z0-9][a-z0-9-]*)/g
+
+/** `<<EOF`, `<<-EOF` or `<<'EOF'`. `<<<` is a herestring and opens nothing. */
+const HEREDOC_START = /<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
+
+/**
+ * Drop a trailing comment. A `#` only starts one at the beginning of a word, so
+ * `${lv_bytes#/}` and `grep -q '#' file; ck id "…" $?` survive intact.
+ */
+function withoutComment(line: string): string {
+  const hash = /(?:^|[ \t])#/.exec(line)
+  return hash === null ? line : line.slice(0, hash.index)
+}
 
 export function countCheckpoints(gradeScript: string): number {
-  return new Set([...gradeScript.matchAll(CK_CALL)].map((m) => m[1])).size
+  const ids = new Set<string>()
+  let heredoc: string | undefined
+
+  for (const raw of gradeScript.split('\n')) {
+    if (heredoc !== undefined) {
+      if (raw.trim() === heredoc) heredoc = undefined
+      continue
+    }
+
+    // A `ck` inside a heredoc body is text the grader prints, not a checkpoint
+    // it runs: counting it inflates `expectedTotal` and reports a correct
+    // solution as `incomplete`, which is a false *fail*.
+    const code = withoutComment(raw).replace(/<<</g, ' ')
+    const started = HEREDOC_START.exec(code)
+    if (started?.[2] !== undefined) heredoc = started[2]
+
+    for (const m of code.matchAll(CK_CALL)) {
+      const id = m[1]
+      if (id !== undefined) ids.add(id)
+    }
+  }
+
+  return ids.size
 }
 
 export function maxRungFor(mode: SessionMode): Rung {
@@ -54,8 +100,14 @@ export interface MaskedCheckpoint {
 }
 
 export interface GradeReport {
+  /** Distinct checkpoint ids that passed. */
   passed: number
-  /** How many checkpoints the verdict actually carried. */
+  /**
+   * How many distinct checkpoint ids the verdict carried — the same unit
+   * `expectedTotal` is counted in, so `passed of total` and the comparison
+   * against `expectedTotal` are both apples to apples. A grader that emits one
+   * id twice does not make this go up.
+   */
   total: number
   /** How many the grade script declares. Differs from `total` on a short run. */
   expectedTotal: number
@@ -97,11 +149,18 @@ export function reportFor(
   // (completeVerdictB); verdict A has nothing above it inside grade() to
   // compare against, which is why the comparison belongs here, where the
   // session knows what was declared.
-  const incomplete = v.checkpoints.length < expectedTotal
+  //
+  // Both sides must be counted in the same unit. `expectedTotal` is distinct
+  // ids; `v.checkpoints` is *lines*, and parseVerdict does not dedupe — so
+  // comparing the array length let a grader that emitted one id twice and then
+  // died report a pass for a checkpoint that never ran. `statusById` collapses
+  // to one entry per id, which is the unit both sides now speak.
+  const status = statusById(v)
+  const incomplete = status.size < expectedTotal
 
   const report: GradeReport = {
-    passed: v.checkpoints.filter((c) => c.status === 'pass').length,
-    total: v.checkpoints.length,
+    passed: [...status.values()].filter((s) => s === 'pass').length,
+    total: status.size,
     expectedTotal,
     incomplete,
     allPassed: allPassed(v) && !incomplete,
@@ -111,11 +170,12 @@ export function reportFor(
   if (result.rebootError !== undefined) report.rebootError = result.rebootError
 
   if (namesCheckpoints(mode) || revealed) {
-    report.checkpoints = v.checkpoints.map((c) => ({
-      id: c.id,
-      desc: c.desc,
-      status: c.status,
-    }))
+    // One row per distinct id, last-wins on the status, matching `statusById`
+    // and `total` above: a list of four rows under a heading that says "3 of 5"
+    // is the same wrong-unit bug wearing a different coat.
+    const rows = new Map<string, MaskedCheckpoint>()
+    for (const c of v.checkpoints) rows.set(c.id, { id: c.id, desc: c.desc, status: c.status })
+    report.checkpoints = [...rows.values()]
     report.regressions = result.regressions.map((c) => c.id)
   }
 

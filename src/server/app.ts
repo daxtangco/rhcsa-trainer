@@ -119,10 +119,17 @@ export function createApp(deps: AppDeps): Hono {
 
   app.post('/api/sessions', async (c) => {
     const raw: unknown = await c.req.json().catch(() => undefined)
-    const body: Record<string, unknown> = isRecord(raw) ? raw : {}
+    // Name the problem that actually happened. A missing or unparseable body
+    // used to be reported as `unknown task: undefined`, which sends the reader
+    // looking for a task id they never sent.
+    if (!isRecord(raw)) {
+      return c.json({ error: 'body must be a JSON object with taskId and mode' }, 400)
+    }
+    const body: Record<string, unknown> = raw
 
     const taskId = typeof body.taskId === 'string' ? body.taskId : undefined
-    const task = taskId === undefined ? undefined : deps.bank.tasksById.get(taskId)
+    if (taskId === undefined) return c.json({ error: 'taskId must be a string' }, 400)
+    const task = deps.bank.tasksById.get(taskId)
     if (task === undefined) return c.json({ error: `unknown task: ${taskId}` }, 400)
     if (!isSessionMode(body.mode)) {
       return c.json({ error: 'mode must be one of guided, practice, drill, exam' }, 400)
@@ -235,6 +242,14 @@ export function createApp(deps: AppDeps): Hono {
   app.post('/api/sessions/:id/grade', async (c) => {
     const s = deps.sessions.get(c.req.param('id'))
     if (s === undefined) return c.json({ error: 'unknown session' }, 404)
+    // Finishing is what unmasks the checkpoint names, so grading afterwards is
+    // grading with the answer key in hand - and the rating derived at the next
+    // finish would describe an attempt that never happened. 409 for the same
+    // reason /hint uses it: the request is well formed, the session has nothing
+    // left to give.
+    if (s.phase === 'graded') {
+      return c.json({ error: `session ${s.id} is finished; start a new one to attempt it again` }, 409)
+    }
     const task = deps.bank.tasksById.get(s.taskId)
     if (task === undefined) return c.json({ error: `unknown task: ${s.taskId}` }, 500)
 
@@ -259,6 +274,13 @@ export function createApp(deps: AppDeps): Hono {
   app.post('/api/sessions/:id/finish', (c) => {
     const s = deps.sessions.get(c.req.param('id'))
     if (s === undefined) return c.json({ error: 'unknown session' }, 404)
+    // Finishing is terminal and happens once. Otherwise the measured attack
+    // works: finish early to read which checkpoints failed, fix exactly those,
+    // finish again, and collect a rating that claims a cold solve - in exam
+    // mode, where the whole point is that the report is masked until the end.
+    if (s.phase === 'graded') {
+      return c.json({ error: `session ${s.id} is already finished` }, 409)
+    }
     const result = s.result
     if (result === undefined) {
       return c.json({ error: 'nothing has been graded yet' }, 409)
