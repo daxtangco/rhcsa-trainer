@@ -3,20 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.18.0" },
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "rhcsa": "node src/cli/index.ts"
+    "rhcsa": "node src/cli/index.ts",
+    "dev:server": "node --env-file-if-exists=.env.local src/server/index.ts"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.1",
     "gray-matter": "^4.0.3",
-    "js-yaml": "^4.1.0"
+    "hono": "^4.13.5",
+    "js-yaml": "^4.1.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.8.0",
     "vitest": "^3.0.0"
   }

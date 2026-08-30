@@ -112,6 +112,47 @@ export interface SshConfigSlice {
  */
 const KNOWN_HOSTS = join(homedir(), '.ssh', 'rhcsa_known_hosts')
 
+/**
+ * The pinned ssh options, shared by `SshTransport` and the terminal bridge. One
+ * definition, because a terminal that trusts a different host key than the
+ * grader does is a bug nobody would think to look for.
+ *
+ * The no-IP throw lives here rather than in the caller so every consumer
+ * inherits it. Building `student@` out of a missing IP would turn a legible
+ * configuration error into a connection attempt against the empty hostname —
+ * and for the terminal that is worse than for the grader, because the student
+ * sees a bare ssh failure with nothing naming `RHCSA_VM_IP`.
+ *
+ * `'bash -s'` is deliberately *not* included: it is how the transport feeds a
+ * script on stdin, whereas the terminal appends `-tt` and an interactive
+ * command instead.
+ */
+export function sshArgs(cfg: SshConfigSlice): string[] {
+  if (!cfg.ip) {
+    throw new Error(
+      'SshTransport has no IP. Set RHCSA_VM_IP in .env.local, or let the vmrun ' +
+        'transport handle it.',
+    )
+  }
+  return [
+    '-o',
+    'BatchMode=yes',
+    '-o',
+    'StrictHostKeyChecking=accept-new',
+    '-o',
+    `UserKnownHostsFile=${KNOWN_HOSTS}`,
+    '-o',
+    'ConnectTimeout=10',
+    '-o',
+    'LogLevel=ERROR',
+    '-i',
+    cfg.sshKey,
+    '-p',
+    String(cfg.sshPort),
+    `${cfg.sshUser}@${cfg.ip}`,
+  ]
+}
+
 export class SshTransport implements LabTransport {
   readonly kind: TransportKind = 'ssh'
   #cfg: SshConfigSlice
@@ -123,31 +164,8 @@ export class SshTransport implements LabTransport {
   }
 
   #args(): string[] {
-    if (!this.#cfg.ip) {
-      throw new Error(
-        'SshTransport has no IP. Set RHCSA_VM_IP in .env.local, or let the vmrun ' +
-          'transport handle it.',
-      )
-    }
-    return [
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'StrictHostKeyChecking=accept-new',
-      '-o',
-      `UserKnownHostsFile=${KNOWN_HOSTS}`,
-      '-o',
-      'ConnectTimeout=10',
-      '-o',
-      'LogLevel=ERROR',
-      '-i',
-      this.#cfg.sshKey,
-      '-p',
-      String(this.#cfg.sshPort),
-      `${this.#cfg.sshUser}@${this.#cfg.ip}`,
-      // Read the script from stdin, so nothing about it is ever quoted.
-      'bash -s',
-    ]
+    // Read the script from stdin, so nothing about it is ever quoted.
+    return [...sshArgs(this.#cfg), 'bash -s']
   }
 
   async exec(script: string): Promise<ExecResult> {

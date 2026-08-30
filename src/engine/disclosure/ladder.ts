@@ -15,6 +15,16 @@ export const MAX_RUNG: Record<LadderMode, Rung> = {
   exam: 2,
 }
 
+/**
+ * The top of the ladder. `guided` mode sits here by construction, so it needs a
+ * name: spelling `5` at each guided-mode branch duplicates `MAX_RUNG.practice`
+ * with nothing making the two move together.
+ */
+export const TOP_RUNG: Rung = 5
+
+/** Every rung, in order. Typed here so no caller needs a cast to build it. */
+export const RUNGS: readonly Rung[] = [1, 2, 3, 4, 5]
+
 export interface LadderState {
   mode: LadderMode
   rung: Rung
