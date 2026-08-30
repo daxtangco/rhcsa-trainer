@@ -16,7 +16,7 @@ a quiz bolted onto a book.
 1. Build the lab VM once by hand: [`docs/vm-build-checklist.md`](docs/vm-build-checklist.md).
    You need a RHEL 9 binary DVD ISO from your own Red Hat Developer account.
 2. Check that WSL can reach it: `bash scripts/r1-probe.sh`.
-3. Configure it: `bash scripts/provision.sh` (Task 19; does not exist yet).
+3. Configure it: `bash scripts/provision.sh`.
 4. Check the content bank's state: `node src/cli/index.ts coverage`. Right
    now this exits non-zero and reports `content/tasks` and `content/concepts`
    as missing — that is expected at this point in the project, not a broken
