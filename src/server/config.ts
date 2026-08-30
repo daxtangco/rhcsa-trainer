@@ -38,6 +38,27 @@ export const HOST = '127.0.0.1'
 export const VITE_DEV_PORT = 5173
 
 /**
+ * Everything `serve` needs, assembled here so `hostname` cannot be dropped from
+ * the one call that binds the socket. Testing `HOST` proved only that a test's
+ * own `serve` call binds loopback; `index.ts` has four import-time side effects
+ * and cannot be imported, so deleting `hostname: HOST` from *it* broke nothing.
+ * With the options built here, the production line has no hostname of its own to
+ * lose, and a test can assert on the object.
+ */
+export function serveOptions(fetch: FetchLike, port: number): ServeOptions {
+  return { fetch, port, hostname: HOST }
+}
+
+/** Narrower than `@hono/node-server`'s `FetchCallback`, and enough for both callers. */
+type FetchLike = (request: Request) => Response | Promise<Response>
+
+export interface ServeOptions {
+  fetch: FetchLike
+  port: number
+  hostname: string
+}
+
+/**
  * The origins a browser may open `/ws/terminal` from. Loopback binding does not
  * cover this: a WebSocket upgrade is exempt from the same-origin policy, and a
  * page on any site can reach `ws://localhost` through the user's own browser.

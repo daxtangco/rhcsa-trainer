@@ -118,12 +118,15 @@ const CFG = {
 async function withServer(
   allowedOrigins: ReadonlySet<string>,
   fn: (port: number, spawned: Array<[number, number]>, kills: () => number) => Promise<void>,
-  over: { cfg?: VmConfig; realPty?: boolean } = {},
+  over: { cfg?: VmConfig; realPty?: boolean; heartbeatMs?: number } = {},
 ): Promise<void> {
   const spawned: Array<[number, number]> = []
   let kills = 0
   const server: Server = createServer()
   const deps: TerminalDeps = { cfg: over.cfg ?? CFG, allowedOrigins }
+  // Production's 30 s is longer than any test can wait for, which is exactly why
+  // the whole heartbeat block used to delete with the suite green.
+  if (over.heartbeatMs !== undefined) deps.heartbeatMs = over.heartbeatMs
   // `realPty` runs the production `spawnSshPipe`, which is the only way to
   // exercise the throw `sshArgs` raises on a config with no IP. It spawns
   // nothing: the throw happens before `spawn`.
@@ -149,6 +152,19 @@ async function withServer(
   } finally {
     wss.close()
     await new Promise<void>((resolve) => server.close(() => resolve()))
+  }
+}
+
+/**
+ * Wait for something to become true, and name it when it does not. A bare
+ * `await once(...)` on an event that never arrives fails as a five-second test
+ * timeout with nothing in it; this says which behaviour went missing.
+ */
+async function until(pred: () => boolean, what: string, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms
+  while (!pred()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
+    await new Promise<void>((resolve) => setTimeout(resolve, 5))
   }
 }
 
@@ -253,6 +269,69 @@ describe('attachTerminal', () => {
       expect(await connect(port, '/ws/terminal')).toBe('open')
       expect(spawned).toHaveLength(2)
     })
+  })
+
+  it('terminates a socket that stops answering pings and kills the shell behind it', async () => {
+    // A raw TCP socket never answers a ping, which is what a closed laptop or a
+    // NAT timeout looks like: no FIN, no RST, just silence. Without the
+    // heartbeat, `ssh -tt` and a guest PTY stay alive on the machine running the
+    // trainer indefinitely. Two beats is the contract - the first ping goes out,
+    // the second beat sees no pong and gives up.
+    await withServer(
+      ALLOWED,
+      async (port, spawned, kills) => {
+        const sock = await rawUpgrade(port)
+        expect(spawned).toHaveLength(1)
+
+        let closed = false
+        sock.on('close', () => {
+          closed = true
+        })
+        try {
+          // Polled rather than awaited on one event: `terminate()` destroys the
+          // socket and emits the server-side 'close' that kills the pty in a
+          // separate turn, so asserting on the client's close alone raced it.
+          await until(() => closed, 'the silent socket to be terminated')
+          await until(() => kills() >= 1, 'the shell behind the dead socket to be killed')
+        } finally {
+          // The test cleans up its own socket rather than relying on the
+          // behaviour under test. Without this, deleting the heartbeat leaves
+          // this socket open, `server.close()` waits on it, and the failure
+          // arrives as a bare 10 s timeout instead of the sentence above.
+          sock.destroy()
+        }
+      },
+      { heartbeatMs: 25 },
+    )
+  })
+
+  it('leaves a socket that answers its pings alone', async () => {
+    // The other half, and the reason the first test is not satisfied by an
+    // interval that terminates everything it touches: `ws` answers a ping itself,
+    // so an idle-but-live terminal must survive beat after beat.
+    await withServer(
+      ALLOWED,
+      async (port, _spawned, kills) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/terminal`)
+        await new Promise<void>((resolve, reject) => {
+          ws.on('open', () => resolve())
+          ws.on('error', reject)
+        })
+
+        try {
+          // Five beats' worth of silence from the user, all of them answered.
+          await new Promise<void>((resolve) => setTimeout(resolve, 260))
+
+          expect(ws.readyState).toBe(WebSocket.OPEN)
+          expect(kills()).toBe(0)
+        } finally {
+          // Same reason as above: a failed assertion here must not leave a live
+          // socket for `server.close()` to wait on.
+          ws.close()
+        }
+      },
+      { heartbeatMs: 50 },
+    )
   })
 
   it('tells the client why the terminal cannot start instead of taking the API down', async () => {

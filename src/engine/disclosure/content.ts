@@ -111,6 +111,15 @@ function scanLine(line: string): { code: string; heredoc?: string } {
 
     if (line.startsWith('<<<', i)) {
       // A herestring feeds one word to stdin. It opens nothing.
+      //
+      // Measured redundant today: the *anchoring* on HEREDOC_START is already
+      // what refuses `<<<`, because the character after `<<` is `<` and not
+      // `['"]?[A-Za-z_]`. Delete this branch and the herestring test still
+      // passes, so that test pins the anchoring rather than this branch. It is
+      // kept for the case where the anchor is ever loosened, not for its output:
+      // on the contrived `<<<WORD cmd` this branch emits `WORD` where falling
+      // through to `<<` would emit nothing, because `<WORD` is not a command
+      // shape. No bank solution starts a line with a herestring.
       code += ' '
       i += 3
       continue
@@ -157,6 +166,12 @@ function scanLine(line: string): { code: string; heredoc?: string } {
  *   live: `nmcli … "$(cat /etc/rhcsa-conn)"` in troubleshooting/028's first
  *   solution no longer contributes `cat`. Losing an incidental `cat` is the
  *   price of not handing over `Listen` and `DocumentRoot`.
+ * - a **wrapped** command sketches as the wrapper alone: `sudo sh -c "systemctl
+ *   restart httpd"` emits `sh`, because the real command sits inside the quoted
+ *   run that `scanLine` empties. Measured unreachable today — no solution,
+ *   antisolution or setup script in the bank uses `sh -c` or `bash -c` — so this
+ *   is a disclosure rather than a bug to fix, and the authoring convention below
+ *   is what keeps it that way.
  *
  * The authoring convention that follows: a task's **first** solution should be
  * written as straight-line commands, because `loadTaskScripts` sorts fixture

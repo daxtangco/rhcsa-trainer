@@ -192,6 +192,16 @@ export function createApp(deps: AppDeps): Hono {
   app.post('/api/sessions/:id/reset', async (c) => {
     const s = deps.sessions.get(c.req.param('id'))
     if (s === undefined) return c.json({ error: 'unknown session' }, 404)
+    // A finished attempt has a clock that has already stopped. `restart` moves
+    // `startedAt` forward and leaves `endedAt` where it was, so anything reading
+    // `endedAt - startedAt` as time spent gets a negative number. The comment
+    // below already argues that a reset must not make the report describe an
+    // attempt that did not happen; that applies to the clock as much as to the
+    // rung. There is no learning use for reverting a finished session's VM -
+    // starting a new session is that.
+    if (s.phase === 'graded') {
+      return c.json({ error: `session ${s.id} is finished; start a new one to attempt it again` }, 409)
+    }
     const task = deps.bank.tasksById.get(s.taskId)
     if (task === undefined) return c.json({ error: `unknown task: ${s.taskId}` }, 500)
 
@@ -216,6 +226,15 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(view(s))
   })
 
+  // Unlike `/reset`, `/grade` and `/finish`, this route stays open after a
+  // finish, deliberately. Nothing stored can be contradicted by a later rung:
+  // `rating` below is a local, derived once from the `rungUsed` captured at that
+  // moment and never persisted, and `/finish` is already 409 on a second call. So
+  // what is left is disclosure, and the mode caps are what keep that honest -
+  // exam stops at rung 2 and drill at 3, so neither can reach solution content
+  // after finishing. In practice mode reaching rung 5 right after the attempt is
+  // scored is the product working: this app exists so the user never has to open
+  // the book, and that is the moment they most want the whole answer.
   app.post('/api/sessions/:id/hint', async (c) => {
     const s = deps.sessions.get(c.req.param('id'))
     if (s === undefined) return c.json({ error: 'unknown session' }, 404)
@@ -245,8 +264,9 @@ export function createApp(deps: AppDeps): Hono {
     // Finishing is what unmasks the checkpoint names, so grading afterwards is
     // grading with the answer key in hand - and the rating derived at the next
     // finish would describe an attempt that never happened. 409 for the same
-    // reason /hint uses it: the request is well formed, the session has nothing
-    // left to give.
+    // reason /hint's rung cap uses it - the request is well formed, the session
+    // has nothing left to give - and not because /hint refuses a finished
+    // session, which it deliberately does not.
     if (s.phase === 'graded') {
       return c.json({ error: `session ${s.id} is finished; start a new one to attempt it again` }, 409)
     }

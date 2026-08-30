@@ -137,6 +137,13 @@ export interface TerminalDeps {
   allowedOrigins: ReadonlySet<string>
   /** Injection point for the tests; production always gets `spawnSshPipe`. */
   spawnPty?: (cfg: VmConfig, cols: number, rows: number) => PtyLike
+  /**
+   * The second injection point, and it exists for the same reason as the first:
+   * at 30 s no test can wait for a beat, so the entire heartbeat block - interval,
+   * `pong` handler, `terminate` - deleted with the suite still green. Production
+   * leaves this unset.
+   */
+  heartbeatMs?: number
 }
 
 /** Attach a WebSocket endpoint at /ws/terminal to an existing HTTP server. */
@@ -217,7 +224,7 @@ export function attachTerminal(server: Server, deps: TerminalDeps): WebSocketSer
         }
         alive = false
         ws.ping()
-      }, HEARTBEAT_MS)
+      }, deps.heartbeatMs ?? HEARTBEAT_MS)
       // An open terminal must not be the reason the process cannot exit.
       beat.unref()
 

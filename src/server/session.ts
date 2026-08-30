@@ -34,9 +34,14 @@ export interface SessionRecord {
  * A `ck` may begin its line or follow a command separator, because
  * `content/lib/assert.sh` documents `some_condition; ck my-id "…" $?` as *the*
  * usage — and a checkpoint this counter cannot see is a checkpoint the
- * `incomplete` guard below stops defending. It is deliberately blind to a `ck`
- * in a comment (stripped before matching) and, in practice, to the word `ck`
- * inside a string, since no separator precedes it there.
+ * `incomplete` guard below stops defending. It is blind to a `ck` in a comment
+ * and to one inside a quoted run, both because `scanLine` removes them before
+ * this pattern ever sees the line. That second half used to be an accident of
+ * this pattern — "no separator precedes it inside a string" — and adding the
+ * separator alternation quietly falsified it: `printf "ok; ck phantom-id\n"`
+ * declared a checkpoint that does not exist, which reports a correct solution as
+ * `incomplete`. It is now a property of the scan rather than a hope about the
+ * regex.
  *
  * The id class is deliberately **wider than the authoring convention**, which is
  * lowercase kebab and stays that way — enforcing it belongs to the static lint
@@ -50,23 +55,110 @@ export interface SessionRecord {
  * be the loud half. Measured: widening it moves none of the six counts the bank
  * pins (`assert.sh` 0; 019=8, 014=5, 017=5, 028=5, 006=8).
  *
- * Known misses, all fail-*open* in the counting direction (they under-count, so
- * `incomplete` under-fires) and none of them used by any grader in the bank: a
- * `ck` after `then`, `do`, `else`, `{`, `(` or a line continuation.
+ * Known misses. All of them under-count, which is the fail-*open* direction —
+ * `expectedTotal` lands low, so `incomplete` under-fires — and none is used by
+ * any grader in the bank (measured: 43 `ck` call sites across the five graders,
+ * every one at column 0 or indented):
+ *
+ * - a `ck` after `then`, `do`, `else`, `{` or `(` on the same line. Nothing in
+ *   `content/` or `docs/` matches that shape and `assert.sh` documents only the
+ *   comment form and the separator form, so this stays a disclosure.
+ * - a `ck` whose id is produced by an arithmetic shift's neighbour:
+ *   `want=$(( 1 << shift ))` opens a phantom heredoc, because the `<<` is not
+ *   inside quotes and this scan does not track redirect position. Every line
+ *   after it is discarded. No grader shifts (measured: the only `$((` uses are
+ *   `/ 86400` and `1024 ** 2..4`), and the runtime warning in `reportFor` is
+ *   what would surface it if one did.
+ *
+ * A **line continuation is not** in this list, though it was once claimed here:
+ * measured, `test -f /x \` followed by `  && ck cont-id "d" $?` counts 1, and so
+ * does a continued bare `ck` — the separator alternation and the leading-space
+ * alternation each cover it.
  */
 const CK_CALL =
   /(?:^[ \t]*|[;&|][ \t]*)ck(?:_pass|_fail|_skip)?[ \t]+["']?([A-Za-z0-9_][A-Za-z0-9_-]*)/g
 
-/** `<<EOF`, `<<-EOF` or `<<'EOF'`. `<<<` is a herestring and opens nothing. */
-const HEREDOC_START = /<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
+/**
+ * `<<EOF`, `<<-EOF` or `<<'EOF'`, **anchored** — it is matched against the slice
+ * that starts at a `<<`, never against the whole line. Unanchored, it was the
+ * same defect F8 fixed in `content.ts`: `echo "a << b"` opened a heredoc named
+ * `b` and every remaining line of the grader was discarded.
+ */
+const HEREDOC_START = /^<<-?[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/
+
+/** A `ck` token sitting immediately before the quote that quotes its id. */
+const CK_BEFORE_QUOTE = /ck(?:_pass|_fail|_skip)?[ \t]+$/
 
 /**
- * Drop a trailing comment. A `#` only starts one at the beginning of a word, so
- * `${lv_bytes#/}` and `grep -q '#' file; ck id "…" $?` survive intact.
+ * What `CK_CALL` is allowed to look at, plus the heredoc the line opens. The
+ * twin of `commandSketch`'s `scanLine`, and deliberately not shared with it: a
+ * **quoted id must survive here** (`ck_pass 'home-from-lv' "…"` is a shape the
+ * bank uses) and must not survive there (a quoted `sed` expression is argument
+ * text). One scanner cannot be right for both.
+ *
+ * Three orderings in here are load-bearing, each because the alternative was
+ * measured wrong:
+ *
+ * 1. `<<` is read **before** any quote handling, so `<<'EOF'` still names its
+ *    delimiter. Emptying quoted runs first loses it.
+ * 2. A quoted run is emptied **unless** a `ck` token precedes it, so the phantom
+ *    id in `printf "ok; ck phantom-id\n"` disappears while `ck_pass 'id'`
+ *    survives. Emptying unconditionally breaks the quoted id.
+ * 3. The comment cut happens inside the same walk, so a `#` inside a quoted run
+ *    is not a comment. Stripping comments first truncated
+ *    `printf "a # b"; ck real "d" $?` at the `#`, leaving an unterminated quote
+ *    and losing a real checkpoint.
  */
-function withoutComment(line: string): string {
-  const hash = /(?:^|[ \t])#/.exec(line)
-  return hash === null ? line : line.slice(0, hash.index)
+function scanLine(line: string): { code: string; heredoc?: string } {
+  let code = ''
+  let heredoc: string | undefined
+  let i = 0
+
+  while (i < line.length) {
+    const ch = line.charAt(i)
+
+    // Defence in depth: the anchored HEREDOC_START already refuses `<<<`,
+    // because the character after `<<` is `<`. Skipping all three keeps the
+    // herestring's word out of the emitted code as well.
+    if (line.startsWith('<<<', i)) {
+      code += ' '
+      i += 3
+      continue
+    }
+
+    if (line.startsWith('<<', i)) {
+      const m = HEREDOC_START.exec(line.slice(i))
+      if (heredoc === undefined && m?.[2] !== undefined) heredoc = m[2]
+      code += ' '
+      i += 2
+      continue
+    }
+
+    if (ch === "'" || ch === '"') {
+      const close = line.indexOf(ch, i + 1)
+      if (CK_BEFORE_QUOTE.test(code)) {
+        // The id itself. Keep it, quotes and all - `CK_CALL` allows the quote.
+        code += close === -1 ? line.slice(i) : line.slice(i, close + 1)
+      } else {
+        // Argument text, and possibly a `; ck …` inside it. Keep the delimiters
+        // so nothing on either side of the run gets glued together.
+        code += ch + ch
+      }
+      // An unclosed quote runs to end of line.
+      if (close === -1) break
+      i = close + 1
+      continue
+    }
+
+    // A `#` starts a comment only at the start of a word, so `${lv_bytes#/}`
+    // survives.
+    if (ch === '#' && (i === 0 || /[ \t]/.test(line.charAt(i - 1)))) break
+
+    code += ch
+    i += 1
+  }
+
+  return { code, heredoc }
 }
 
 export function countCheckpoints(gradeScript: string): number {
@@ -82,11 +174,10 @@ export function countCheckpoints(gradeScript: string): number {
     // A `ck` inside a heredoc body is text the grader prints, not a checkpoint
     // it runs: counting it inflates `expectedTotal` and reports a correct
     // solution as `incomplete`, which is a false *fail*.
-    const code = withoutComment(raw).replace(/<<</g, ' ')
-    const started = HEREDOC_START.exec(code)
-    if (started?.[2] !== undefined) heredoc = started[2]
+    const scanned = scanLine(raw)
+    if (scanned.heredoc !== undefined) heredoc = scanned.heredoc
 
-    for (const m of code.matchAll(CK_CALL)) {
+    for (const m of scanned.code.matchAll(CK_CALL)) {
       const id = m[1]
       if (id !== undefined) ids.add(id)
     }
@@ -169,6 +260,21 @@ export function reportFor(
   // to one entry per id, which is the unit both sides now speak.
   const status = statusById(v)
   const incomplete = status.size < expectedTotal
+
+  // The other direction, which no field on this report can express: more distinct
+  // ids arrived than the script declared. That cannot be the machine's fault -
+  // the grader emitted them - so it means `countCheckpoints` under-counted, and
+  // an under-count is what turns the `incomplete` guard off. Over-arrival is
+  // therefore the runtime signature of a counter bug, and the counter has had
+  // four. Warn, and do not fail the grade: the count is the suspect here, and
+  // failing a correct run over a bad count is the mistake this whole guard exists
+  // to avoid.
+  if (status.size > expectedTotal) {
+    console.warn(
+      `[grade] ${status.size} checkpoints arrived but the script declares ${expectedTotal};` +
+        ' countCheckpoints under-counted this grader',
+    )
+  }
 
   const report: GradeReport = {
     passed: [...status.values()].filter((s) => s === 'pass').length,

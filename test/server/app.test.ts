@@ -485,6 +485,79 @@ describe('grading and finishing', () => {
     expect(at(after, 'phase')).toBe('graded')
   })
 
+  it('lets no session route other than grade and finish emit a checkpoint id in exam mode', async () => {
+    // F3 made finishing terminal, but nothing holds the property F3 exists to
+    // protect on the routes F3 did not gate. Measured: adding one field to
+    // `view()` - `result: s.result`, the obvious edit when Task 24 needs one more
+    // value on the Lab screen - publishes the whole unmasked checkpoint list
+    // through GET /api/sessions/:id and /reset, in exam mode, before any finish,
+    // and the app suite stayed at 18 passed. The exam answer key would ship to
+    // the browser with a green build.
+    //
+    // Read off the route table rather than a hand-written list, so a session
+    // route added later is covered the day it is added.
+    const { a } = app()
+    const id = await start(a, 'exam')
+    await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })
+
+    const routes = a.routes.filter(
+      (r) => r.path.startsWith('/api/sessions/:id') && !/\/(grade|finish)$/.test(r.path),
+    )
+    // If the filter ever matches nothing, this test passes while checking
+    // nothing at all.
+    expect(routes.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
+      'GET /api/sessions/:id',
+      'POST /api/sessions/:id/hint',
+      'POST /api/sessions/:id/reset',
+    ])
+
+    for (const r of routes) {
+      const res = await a.request(r.path.replace(':id', id), { method: r.method })
+      expect(res.status).toBeLessThan(400)
+      // The serialised body, not a parsed field: a leak through a nested or
+      // renamed key is still a leak.
+      const body = await res.text()
+      for (const key of ['lv-home-size', 'fs-home-size']) {
+        expect(body).not.toContain(key)
+      }
+    }
+  })
+
+  it('refuses to reset a finished session but keeps answering hints in practice mode', async () => {
+    // Two halves of the same question, answered differently on purpose.
+    //
+    // `/reset` is incoherent after a finish: `restart` moves `startedAt` past the
+    // `endedAt` that is already recorded, so anything reading `endedAt -
+    // startedAt` as time spent gets a negative number - and /reset's own comment
+    // already argues that a reset must not make the report describe an attempt
+    // that did not happen.
+    //
+    // `/hint` is not, and stays open: the rating is a local derived once at
+    // finish and never persisted, /finish is already 409 on a second call, and the
+    // mode caps hold exam at rung 2 and drill at 3 - so nothing stored can be
+    // contradicted and no graded mode can reach solution content afterwards. In
+    // practice mode, reading rung 5 right after the attempt is scored is what the
+    // app is for.
+    const { a } = app()
+    const id = await start(a, 'practice')
+    await a.request(`/api/sessions/${id}/grade`, { method: 'POST' })
+    const done = await (await a.request(`/api/sessions/${id}/finish`, { method: 'POST' })).json()
+    const startedAt = num(done, 'startedAt')
+
+    const reset = await a.request(`/api/sessions/${id}/reset`, { method: 'POST' })
+    expect(reset.status).toBe(409)
+    expect(str(await reset.json(), 'error')).toMatch(/finished/)
+
+    // The clock the rating was derived from is untouched, which is the point.
+    const after = await (await a.request(`/api/sessions/${id}`)).json()
+    expect(num(after, 'startedAt')).toBe(startedAt)
+    expect(num(after, 'endedAt')).toBeGreaterThan(startedAt)
+
+    const hint = await a.request(`/api/sessions/${id}/hint`, { method: 'POST' })
+    expect(hint.status).toBe(200)
+    expect(at(await hint.json(), 'rung')).toBe(2)
+  })
+
   it('409s on finish before anything was graded', async () => {
     const { a } = app()
     const id = await start(a, 'practice')

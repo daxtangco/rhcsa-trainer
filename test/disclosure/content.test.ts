@@ -214,6 +214,22 @@ describe('commandSketch over the real bank', () => {
     expect(s).toContain('firewall-cmd')
   })
 
+  it('pins troubleshooting/028, the other sketch this change moved', async () => {
+    // Exactly two bank sketches changed when quoted runs stopped contributing
+    // words: 019 lost `Listen` and `DocumentRoot`, and this one lost `cat` from
+    // `nmcli … "$(cat /etc/rhcsa-conn)"`. What survives is the whole answer to
+    // "restore remote access", so the hint did not get worse - but it was the one
+    // output this diff moved and did not pin, which is exactly the output a future
+    // splitter change could move again unnoticed.
+    expect(
+      commandSketch(
+        await solution(
+          'tasks/troubleshooting/028-restore-remote-access/solutions/01-systemctl-firewallcmd-nmcli.sh',
+        ),
+      ),
+    ).toEqual(['systemctl', 'firewall-cmd', 'nmcli'])
+  })
+
   it('still sketches the other real solutions it is rendered from', async () => {
     expect(
       commandSketch(await solution('tasks/storage/014-grow-home-lv/solutions/01-lvextend-then-growfs.sh')),

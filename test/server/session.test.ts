@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   countCheckpoints,
   maxRungFor,
@@ -118,6 +118,53 @@ describe('countCheckpoints', () => {
     // Lowercase kebab remains what authors write; the counter is just permissive
     // so that a non-conforming id is a lint error rather than a silent miscount.
     expect(countCheckpoints('ck lv-size "d" $?\nck lv "d" $?\n')).toBe(2)
+  })
+
+  it('does not let a << that is not a heredoc opener swallow the rest of the grader', () => {
+    // The unanchored, quote-blind HEREDOC_START was the same defect F8 fixed one
+    // file over: `echo "a << b"` opened a heredoc named `b`, every line after it
+    // was discarded, and a grader containing that line declared fewer
+    // checkpoints than it has. `expectedTotal` is the only thing standing between
+    // a truncated run and a false pass, so this is the fail-open direction.
+    // `ck` is at column 0 in each case, so only heredoc handling can move it.
+    expect(countCheckpoints('echo "a << b"\nck real-id "d" $?\n')).toBe(1)
+    expect(countCheckpoints("echo 'x << y'\nck real-id \"d\" $?\n")).toBe(1)
+    expect(countCheckpoints('printf "%s\\n" "a << EOF"\nck real-id "d" $?\nck two "d" $?\n')).toBe(2)
+    // A `<<` inside a trailing comment. Measured: this one already passed before
+    // the fix, because the old scanner cut comments in a separate pass *before*
+    // looking for an opener. It is pinned anyway, because the new scanner does
+    // both in one walk and so depends on an ordering - the walk stops at the `#`
+    // before it ever reaches these two `<`s - that nothing else asserts.
+    expect(countCheckpoints('echo hi   # heredocs use << here\nck real-id "d" $?\n')).toBe(1)
+    // And the residual, disclosed rather than fixed: an arithmetic shift is not
+    // inside quotes, so it still opens a phantom heredoc named `shift`. No
+    // grader shifts, and reportFor's over-arrival warning is what would say so
+    // at runtime if one did.
+    expect(countCheckpoints('want=$(( 1 << shift ))\nck real-id "d" $?\n')).toBe(0)
+  })
+
+  it('does not count a ck that a string only mentions after a separator', () => {
+    // The fail-closed twin, and a regression the separator alternation
+    // introduced: a phantom id makes a *complete* run on a correctly solved
+    // machine report `incomplete` and forces allPassed false - a false fail,
+    // which the reportFor comment names as the direction to avoid. The old
+    // tests only pinned separator-free strings, which is why this got through.
+    expect(countCheckpoints('printf "ok; ck phantom-id\\n"\nck real-id "d" $?\n')).toBe(1)
+    expect(countCheckpoints('echo "done; ck it later"\nck real-id "d" $?\n')).toBe(1)
+    expect(countCheckpoints("echo 'step 1 && ck nope'\nck real-id \"d\" $?\n")).toBe(1)
+    // A `#` inside a quoted run is not a comment, so the real ck after it still
+    // counts. Stripping comments before quotes truncated this line at the `#`
+    // and lost the checkpoint entirely.
+    expect(countCheckpoints('printf "a # b"; ck real-id "d" $?\n')).toBe(1)
+  })
+
+  it('keeps a quoted checkpoint id, which is why this scanner is not the sketch scanner', () => {
+    // commandSketch empties every quoted run because its contents are argument
+    // text. Here the contents can be the id itself, so a quote that directly
+    // follows a `ck` token is kept. GRADE_BRANCHED has that shape for real.
+    expect(countCheckpoints(GRADE_BRANCHED)).toBe(3)
+    expect(countCheckpoints('ck_pass \'home-from-lv\' "desc"\n')).toBe(1)
+    expect(countCheckpoints('ck "quoted-id" "desc" $?\n')).toBe(1)
   })
 
   it('finds no checkpoints in the assertion library that gets prepended to every grader', async () => {
@@ -260,6 +307,49 @@ describe('reportFor', () => {
     expect(r.passed).toBe(1)
     expect(r.total).toBe(2)
     expect(r.incomplete).toBe(false)
+  })
+
+  it('warns when more checkpoints arrive than the script declared, and still passes the run', () => {
+    // The only observable runtime signature of an under-count, which is the
+    // failure mode this guard's own input can have: the grader emitted these ids,
+    // so the machine is not the suspect - countCheckpoints is. No report field can
+    // express it, and failing the grade over it would fail a correct run because
+    // of a bad count, which is the mistake the guard exists to prevent. So: warn.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const over = parseVerdict(
+        [
+          '{"id":"a","desc":"x","status":"pass"}',
+          '{"id":"b","desc":"x","status":"pass"}',
+          '{"id":"c","desc":"x","status":"pass"}',
+        ].join('\n'),
+      )
+      const r = reportFor('practice', result({ verdictA: over }), false, 2)
+
+      expect(r.total).toBe(3)
+      expect(r.expectedTotal).toBe(2)
+      expect(r.incomplete).toBe(false)
+      expect(r.allPassed).toBe(true)
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      const said = warn.mock.calls.at(0)?.at(0)
+      expect(typeof said).toBe('string')
+      // Both numbers, so the reader can tell which side to go and look at.
+      expect(String(said)).toMatch(/3 checkpoints arrived/)
+      expect(String(said)).toMatch(/declares 2/)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('says nothing when the counts agree', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      reportFor('practice', result(), false, 2)
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('calls a full verdict complete', () => {

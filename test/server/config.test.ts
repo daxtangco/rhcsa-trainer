@@ -1,8 +1,16 @@
 import { serve } from '@hono/node-server'
 import { once } from 'node:events'
+import { readFile } from 'node:fs/promises'
 import { Server } from 'node:http'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { allowedOriginsFor, HOST, readPort, VITE_DEV_PORT } from '../../src/server/config.ts'
+import {
+  allowedOriginsFor,
+  HOST,
+  readPort,
+  serveOptions,
+  VITE_DEV_PORT,
+} from '../../src/server/config.ts'
 
 describe('readPort', () => {
   it('defaults to 5175', () => {
@@ -64,7 +72,10 @@ describe('HOST', () => {
     // which binds `::` and hands an unauthenticated shell in a passwordless-sudo
     // guest to every device that can route here. Measured both ways; nothing in
     // the codebase would have failed if the argument were dropped.
-    const server = serve({ fetch: () => new Response('ok'), port: 0, hostname: HOST })
+    //
+    // Built by `serveOptions`, not by a literal here: this way the test drives the
+    // same object `index.ts` passes rather than a lookalike assembled in the test.
+    const server = serve(serveOptions(() => new Response('ok'), 0))
     try {
       // `attachTerminal` needs the `upgrade` event, which only the plain
       // node:http server emits - so index.ts's narrowing has to hold.
@@ -81,5 +92,30 @@ describe('HOST', () => {
       // A listening socket must not outlive the test.
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
+  })
+})
+
+describe('serveOptions', () => {
+  it('names the hostname, so the caller has none of its own to forget', () => {
+    const fetch = () => new Response('ok')
+    expect(serveOptions(fetch, 5175)).toEqual({ fetch, port: 5175, hostname: '127.0.0.1' })
+  })
+
+  it('is what production actually calls', async () => {
+    // The last link, and it has to be checked as text. `index.ts` runs
+    // `loadVmConfig`, `loadBank`, `chooseTransport` and `serve` at import time, so
+    // no test can import it - which is why deleting `hostname: HOST` from the one
+    // line that binds the socket broke nothing, while the test above passed. This
+    // fails if that line stops going through `serveOptions`, including by being
+    // "simplified" back to an inline object literal.
+    const src = await readFile(
+      fileURLToPath(new URL('../../src/server/index.ts', import.meta.url)),
+      'utf8',
+    )
+    expect(src).toContain('serve(serveOptions(app.fetch, PORT))')
+    // And there is exactly one `serve(` call *with an argument*, so a second one
+    // cannot appear beside it carrying its own options. The `[^)]` is what keeps
+    // the empty `serve()` in the narrowing error's message out of the count.
+    expect(src.match(/\bserve\([^)]/g)).toHaveLength(1)
   })
 })

@@ -8,7 +8,7 @@ import { loadVmConfig } from '../engine/vm/config.ts'
 import { chooseTransport } from '../engine/vm/select.ts'
 import { VmController } from '../engine/vm/vmrun.ts'
 import { createApp } from './app.ts'
-import { allowedOriginsFor, HOST, readPort, VITE_DEV_PORT } from './config.ts'
+import { allowedOriginsFor, HOST, readPort, serveOptions, VITE_DEV_PORT } from './config.ts'
 import { createLabRuntime } from './lab.ts'
 import { SessionStore } from './session.ts'
 import { attachTerminal } from './terminal.ts'
@@ -35,7 +35,10 @@ const app = createApp({
   now: () => Date.now(),
 })
 
-const server: ServerType = serve({ fetch: app.fetch, port: PORT, hostname: HOST })
+// The options come from `config.ts` so that `hostname` cannot be dropped here
+// without a test noticing: this module has four import-time side effects and
+// cannot be imported, so a test can only reach this line through `serveOptions`.
+const server: ServerType = serve(serveOptions(app.fetch, PORT))
 
 // `serve` returns `Server | Http2Server | Http2SecureServer`. Only the plain
 // node:http server emits `upgrade` the way `attachTerminal` needs, and we never
