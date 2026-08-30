@@ -4,10 +4,13 @@ import { readFile } from 'node:fs/promises'
 import { Server } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { checkCoverage, loadBank } from '../../src/engine/content/bank.ts'
 import {
   allowedOriginsFor,
+  coverageBanner,
   HOST,
   readPort,
+  refuseToServe,
   serveOptions,
   VITE_DEV_PORT,
 } from '../../src/server/config.ts'
@@ -117,5 +120,68 @@ describe('serveOptions', () => {
     // cannot appear beside it carrying its own options. The `[^)]` is what keeps
     // the empty `serve()` in the narrowing error's message out of the count.
     expect(src.match(/\bserve\([^)]/g)).toHaveLength(1)
+  })
+})
+
+describe('refuseToServe', () => {
+  it('serves a bank whose references all resolve', () => {
+    expect(refuseToServe({ problems: [] })).toBeUndefined()
+  })
+
+  it('refuses on a dangling reference and names every one of them', () => {
+    const msg = refuseToServe({
+      problems: [
+        'storage/014-grow-home-lv requires unknown concept: storage.lvm-abstraction-stak',
+        'systemd/017-boot-time-service maps to unknown objective: systemd.nope',
+      ],
+    })
+    expect(msg).toBeDefined()
+    expect(msg).toContain('2 unresolved reference(s)')
+    expect(msg).toContain('storage.lvm-abstraction-stak')
+    expect(msg).toContain('systemd.nope')
+    // The message has to say what the student would have experienced, because the
+    // failure it prevents is silent by nature: a missing concept id resolves to
+    // `undefined` and `contextFor` filters it out, so rung 3 is simply shorter.
+    expect(msg).toMatch(/rung quietly missing/)
+    expect(msg).toMatch(/rhcsa coverage/)
+  })
+
+  it('says nothing about the gap lists, because they are not errors', () => {
+    // The other half of the ruling. `refuseToServe` only reads `problems`, so a
+    // future edit that folds the gap counts into the refusal has to change this.
+    expect(refuseToServe({ problems: [] })).toBeUndefined()
+    expect(coverageBanner({ uncoveredObjectives: ['a', 'b'], untaughtConcepts: [] })).toMatch(
+      /2 uncovered objective\(s\), 0 untaught concept\(s\)/,
+    )
+    expect(coverageBanner({ uncoveredObjectives: [], untaughtConcepts: [] })).toMatch(/not errors/)
+  })
+
+  it('serves the shipped bank, and would not if the gap lists refused', async () => {
+    // Measured against the real content root, because this is the whole reason the
+    // ruling splits on which list. The shipped bank has zero unresolved references
+    // and is far from covering all 58 RHCSA objectives - `rhcsa coverage --strict`
+    // is red on it by design - so a guard that refused on the gaps would refuse to
+    // serve the product.
+    const bank = await loadBank(fileURLToPath(new URL('../../content', import.meta.url)))
+    const report = checkCoverage(bank)
+    expect(report.problems).toEqual([])
+    expect(refuseToServe(report)).toBeUndefined()
+    expect(report.uncoveredObjectives.length).toBeGreaterThan(0)
+  })
+
+  it('is what production actually calls, before it starts serving', async () => {
+    // Same reason as `serveOptions` above: `index.ts` cannot be imported, so the
+    // only way to hold this is as text. Before the fix `checkCoverage` appeared in
+    // `src/cli/index.ts` and nowhere on the serving path at all.
+    const src = await readFile(
+      fileURLToPath(new URL('../../src/server/index.ts', import.meta.url)),
+      'utf8',
+    )
+    expect(src).toContain('checkCoverage(bank)')
+    expect(src).toContain('refuseToServe(coverage)')
+    // And the refusal is reached before the socket is bound, not after: a server
+    // that refuses once it is already listening has already served.
+    expect(src.indexOf('refuseToServe(coverage)')).toBeLessThan(src.indexOf('serve(serveOptions'))
+    expect(src).toContain('process.exit(1)')
   })
 })

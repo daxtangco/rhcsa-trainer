@@ -59,6 +59,63 @@ export interface ServeOptions {
 }
 
 /**
+ * What the server should do about a bank whose cross-references do not resolve,
+ * decided here rather than in `index.ts` for the same reason `serveOptions` is:
+ * `index.ts` has import-time side effects and cannot be imported, so a rule
+ * written inline there is a rule no test can reach.
+ *
+ * `checkCoverage` existed for the whole branch and **ran only in
+ * `rhcsa coverage`**, a command nothing invokes on the way to serving. So a task
+ * pointing at a concept id that does not exist reached the browser: rung 3 renders
+ * `task.requiresConcepts.map(...)`, a missing id resolves to `undefined`, and
+ * `contextFor` filters it out silently — the student asks for the concept card
+ * that explains the thing they are stuck on and is handed a shorter list, with no
+ * error anywhere. `deriveRating` then scores an attempt made without the
+ * disclosure the ladder promised.
+ *
+ * Ruled between refuse-to-serve and log-loudly by **splitting on which list**, and
+ * the split is forced by measurement rather than taste:
+ *
+ * - `problems` — refuse. Every entry is a dangling reference: an unknown concept
+ *   id, an unknown objective id, an unknown prerequisite. Each one is a lie the
+ *   content tells about itself, none is a judgement call, and the shipped bank has
+ *   **zero** of them, so refusing costs a correct bank nothing and a broken one
+ *   exactly the right amount.
+ * - `uncoveredObjectives` / `untaughtConcepts` — log the counts. These are
+ *   *incompleteness*, not incorrectness: 25 tasks cannot cover all 58 RHCSA
+ *   objectives, and `rhcsa coverage --strict` is red on the shipped bank for that
+ *   reason. Refusing on them would refuse to serve the bank this project ships,
+ *   which is not a guard, it is a broken build.
+ *
+ * Returns the operator-facing message, or `undefined` to serve.
+ */
+export function refuseToServe(report: { problems: readonly string[] }): string | undefined {
+  if (report.problems.length === 0) return undefined
+  return [
+    `the content bank has ${report.problems.length} unresolved reference(s), so it cannot be served:`,
+    ...report.problems.map((p) => `  - ${p}`),
+    'Run `rhcsa coverage` for the same report. A task pointing at a concept id that does not',
+    'exist serves a hint ladder with a rung quietly missing, and scores the attempt anyway.',
+  ].join('\n')
+}
+
+/**
+ * The gap counts, for the startup banner. Said out loud on every boot because the
+ * numbers are expected to be non-zero and an operator should still know them —
+ * `rhcsa coverage --strict` is the gate that treats them as failures, and it is a
+ * separate command on purpose.
+ */
+export function coverageBanner(report: {
+  uncoveredObjectives: readonly string[]
+  untaughtConcepts: readonly string[]
+}): string {
+  return (
+    `  ${report.uncoveredObjectives.length} uncovered objective(s), ` +
+    `${report.untaughtConcepts.length} untaught concept(s) — not errors; run \`rhcsa coverage\` for the list`
+  )
+}
+
+/**
  * The origins a browser may open `/ws/terminal` from. Loopback binding does not
  * cover this: a WebSocket upgrade is exempt from the same-origin policy, and a
  * page on any site can reach `ws://localhost` through the user's own browser.

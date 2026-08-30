@@ -2,13 +2,21 @@ import { serve, type ServerType } from '@hono/node-server'
 import { readFile } from 'node:fs/promises'
 import { Server } from 'node:http'
 import { join } from 'node:path'
-import { loadBank } from '../engine/content/bank.ts'
+import { checkCoverage, loadBank } from '../engine/content/bank.ts'
 import { loadTaskScripts } from '../engine/validate/harness.ts'
 import { loadVmConfig } from '../engine/vm/config.ts'
 import { chooseTransport } from '../engine/vm/select.ts'
 import { VmController } from '../engine/vm/vmrun.ts'
 import { createApp } from './app.ts'
-import { allowedOriginsFor, HOST, readPort, serveOptions, VITE_DEV_PORT } from './config.ts'
+import {
+  allowedOriginsFor,
+  coverageBanner,
+  HOST,
+  readPort,
+  refuseToServe,
+  serveOptions,
+  VITE_DEV_PORT,
+} from './config.ts'
 import { createLabRuntime } from './lab.ts'
 import { SessionStore } from './session.ts'
 import { attachTerminal } from './terminal.ts'
@@ -22,6 +30,21 @@ const ALLOWED_ORIGINS = allowedOriginsFor(PORT, VITE_DEV_PORT)
 
 const cfg = loadVmConfig(process.env)
 const bank = await loadBank(CONTENT)
+
+// `loadBank` validates each file against its schema; it does not resolve the
+// references between them. `checkCoverage` does, and until now it ran only in
+// `rhcsa coverage` — a command nothing invokes on the way here — so a task
+// pointing at a concept id that does not exist served a hint ladder with rung 3
+// quietly short and scored the attempt anyway. The rule itself is in `config.ts`,
+// where a test can reach it; see `refuseToServe` for why `problems` refuses and
+// the two gap lists only report.
+const coverage = checkCoverage(bank)
+const refusal = refuseToServe(coverage)
+if (refusal !== undefined) {
+  console.error(`rhcsa-trainer: ${refusal}`)
+  process.exit(1)
+}
+
 const assertLib = await readFile(join(CONTENT, 'lib', 'assert.sh'), 'utf8')
 const transport = await chooseTransport(cfg)
 const controller = new VmController(cfg)
@@ -51,3 +74,4 @@ attachTerminal(server, { cfg, allowedOrigins: ALLOWED_ORIGINS })
 
 console.log(`rhcsa-trainer api on http://${HOST}:${PORT} (transport: ${transport.kind})`)
 console.log(`  ${bank.tasks.length} tasks, ${bank.concepts.length} concepts`)
+console.log(coverageBanner(coverage))
