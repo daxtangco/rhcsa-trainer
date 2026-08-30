@@ -237,3 +237,56 @@ evidence supports that default. This finding does not demonstrate an
 end-to-end SSH connection working, so treat the RHEL VM's first boot (with
 `open-vm-tools` and `openssh-server` per the build checklist) as the point
 where R1 gets its final confirmation, not this task.
+
+## Reading `scripts/r1-probe.sh`'s verdict
+
+Added in Task 25, from a re-measurement of the script rather than from the run
+above. One sharp edge to know about before you trust a verdict:
+
+The summary's catch-all `*)` arm at `scripts/r1-probe.sh:258` prints
+**"R1 CONFIRMED AS A PROBLEM"**, and it catches the `unknown` outcome as well as
+`dropped`. So a probe that failed for a reason the script could not classify
+reads as a confirmed firewall problem. Check the `rc=` the script prints before
+acting on that headline.
+
+What is *not* wrong, contrary to an earlier note that named this file: a
+timed-out TCP probe is not swept into `unknown`. `tcp_rc -eq 124` is handled
+explicitly at `:187` and resolves to `unreachable` when ICMP showed nothing
+claiming the address, or `dropped` otherwise. `tcp_outcome=unknown` is set only
+by the final `else` at `:221`, reached when the status is neither 0 nor 124 and
+the stderr matches none of the known messages. The classification is sound; only
+the headline over-claims.
+
+## Validate failures and what they mean
+
+Moved here in Task 25 from `task-21-report.md`, which is a workspace artifact
+nobody diagnosing a real failure will open.
+
+| Symptom | Cause | What to check |
+|---|---|---|
+| `needs at least 2 solutions` when `solutions/` looks present | the directory name is misspelled; `readdir` failures are swallowed | check the spelling of `solutions/` and `antisolutions/` |
+
+### The id-extraction grep matches comment prose
+
+Task 21's Step 11 extracted the checkpoint ids a grader emits with:
+
+```
+grep -oE 'ck_(pass|fail|skip) [a-z0-9-]+'
+```
+
+This matches a comment as readily as a call, and Task 21's implementer had to
+reword two `grade.sh` comments to get around a collision. It is harmless for the
+direction that check actually uses — a `comm -13` for declared-but-never-emitted
+ids, where spurious extra tokens only inflate the emitted set and cannot produce
+a false finding. The README's "Adding content" section now states the rule this
+imposes on authors: no `ck_pass <word>` in a grader comment.
+
+**Before anything derives a _total_ from this grep, teach it to skip comment
+lines.** For a set difference a too-large emitted set is safe; for a count it is
+a wrong number, and a wrong number is worse than no number — a checkpoint total
+inflated by a comment is exactly the shape of failure the `incomplete` guard
+exists to catch and would itself be fooled by. `npm run lint:content` is the
+maintained version of this extraction: it reuses the runtime's own scanner
+(`checkpointIds` in `src/server/session.ts`) instead of a regex, so it already
+distinguishes a call from a comment, a heredoc body and a quoted string. Prefer
+it over the grep above for anything new.
