@@ -3,11 +3,7 @@
 #
 # READ-ONLY. Changes nothing. Exit code is ignored; only the JSONL matters.
 # assert.sh is prepended by loadTaskScripts (see harness.ts's loadTaskScripts),
-# so its helpers are already here. Because the two files are concatenated
-# before either is parsed, an assertion library that ever contained the
-# literal "# baseline-fail:" would trip the "more than one header" guard in
-# expectations.ts — acceptable because it fails loudly, not silently, and
-# content/lib/assert.sh does not contain that literal today.
+# so its helpers are already here.
 #
 # Checkpoints that must fail before the student does anything. Everything not
 # listed is an invariant and must PASS from the start.

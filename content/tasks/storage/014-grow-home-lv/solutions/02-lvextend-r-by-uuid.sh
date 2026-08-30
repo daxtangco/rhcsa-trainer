@@ -4,7 +4,7 @@
 #   the fstab entry is re-expressed by UUID, so a grader that greps for
 #   /dev/mapper/rhel-home would wrongly reject this
 set -euo pipefail
-sudo lvextend -r -L +4G /dev/mapper/rhel-home
+sudo lvextend -r -L 12G /dev/mapper/rhel-home
 
 uuid=$(sudo blkid -s UUID -o value /dev/mapper/rhel-home)
 # The pattern requires whitespace on both sides of /home, so it cannot match
