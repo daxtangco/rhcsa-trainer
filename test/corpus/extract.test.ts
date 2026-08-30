@@ -144,20 +144,24 @@ describe('findItems', () => {
     expect(ex?.text).toContain('of body.\n\nline two')
   })
 
-  it('returns items sorted by id even when headings appear out of order in the source text', () => {
-    // Fix-1 F2: every existing fixture's headings happen to already appear in
-    // id order in the source, so the final `.sort(...)` in findItems could be
-    // deleted without any test noticing. Here the source order is reversed.
+  it('returns items sorted numerically by id even when headings appear out of order in the source text', () => {
+    // Fix-1 F2 / Fix-2 F6: chapter 9 and chapter 10 disagree under lexical and
+    // numeric collation ('Exercise 10-1' < 'Exercise 9-1' lexically, since '1'
+    // < '9', but 9 < 10 numerically). Putting Exercise 10-1 first in the
+    // source means the source order matches neither a plain lexical sort nor
+    // insertion order against the expected numeric-sorted result, so this one
+    // fixture and assertion catches both deleting `.sort(...)` entirely (F2)
+    // and deleting just its `{ numeric: true }` option (F6).
     const outOfOrder = [
-      'Exercise 24-2 This appears first in the source text',
-      'body of exercise two.',
+      'Exercise 10-1 This appears first in the source text',
+      'body of exercise ten-one.',
       '',
-      'Exercise 24-1 This appears second in the source text',
-      'body of exercise one.',
+      'Exercise 9-1 This appears second in the source text',
+      'body of exercise nine-one.',
     ].join('\n')
 
     const items = findItems(outOfOrder, 'r9').filter((i) => i.kind === 'exercise')
-    expect(items.map((i) => i.id)).toEqual(['Exercise 24-1', 'Exercise 24-2'])
+    expect(items.map((i) => i.id)).toEqual(['Exercise 9-1', 'Exercise 10-1'])
   })
 })
 
