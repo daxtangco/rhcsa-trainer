@@ -32,6 +32,16 @@ export const TOP_RUNG: Rung = 5
 /** Every rung, in order. Typed here so no caller needs a cast to build it. */
 export const RUNGS: readonly Rung[] = [1, 2, 3, 4, 5]
 
+// Exhaustive by construction, the same way `vm/config.ts`'s `KINDS` is: adding a
+// Rung fails to typecheck until it is listed here. `RUNGS` itself stays a
+// `readonly Rung[]` rather than converting to `Record<Rung, true>`, unlike
+// `task.ts`'s `TRANSPORTS` and the other three sites this fix round converted —
+// its order is load-bearing at `server/app.ts`, where it builds the disclosure
+// list served to the client, and a record's keys have no ordering contract this
+// project can rely on. So the array carries order and this assertion carries
+// completeness, kept as two things rather than folded into one.
+const _rungsExhaustive: Record<Rung, true> = { 1: true, 2: true, 3: true, 4: true, 5: true }
+
 export interface LadderState {
   mode: LadderMode
   rung: Rung

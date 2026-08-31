@@ -82,10 +82,10 @@ export interface ServeOptions {
  *   **zero** of them, so refusing costs a correct bank nothing and a broken one
  *   exactly the right amount.
  * - `uncoveredObjectives` / `untaughtConcepts` — log the counts. These are
- *   *incompleteness*, not incorrectness: 25 tasks cannot cover all 58 RHCSA
- *   objectives, and `rhcsa coverage --strict` is red on the shipped bank for that
- *   reason. Refusing on them would refuse to serve the bank this project ships,
- *   which is not a guard, it is a broken build.
+ *   *incompleteness*, not incorrectness: 5 shipped tasks cannot cover 68 RHCSA
+ *   objectives — 58 are uncovered today — and `rhcsa coverage --strict` is red on
+ *   the shipped bank for that reason. Refusing on them would refuse to serve the
+ *   bank this project ships, which is not a guard, it is a broken build.
  *
  * Returns the operator-facing message, or `undefined` to serve.
  */

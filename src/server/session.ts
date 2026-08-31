@@ -540,9 +540,10 @@ export function countCheckpoints(gradeScript: string): number {
  * check is containment rather than a count comparison because the two sets are not
  * the same set — an invariant that passes at baseline is emitted and declared by no
  * header, so `emitted` legitimately exceeds `declared` and comparing sizes would
- * fail every grader in the bank. Containment is what `rhcsa lint` already
- * reconciles, which is why lint catches partial deflation (measured: exit 1, 9
- * problems) while the serving path did not.
+ * fail 2 of the 5 graders in the bank today, and any future grader with a
+ * baseline-passing invariant. Containment is what `rhcsa lint` already
+ * reconciles, which is why lint catches partial deflation (measured: exit 1) while
+ * the serving path did not.
  *
  * **A grader that declares nothing yields `crossChecked: false` and no missing
  * ids** — "no cross-check available", not "suspect". Not every grade script must

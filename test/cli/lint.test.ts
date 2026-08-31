@@ -280,6 +280,30 @@ describe('rhcsa lint fails on planted defects', () => {
     expect(r.code).toBe(0)
   })
 
+  it('does not flag a set-options line joined to a real command by &&', async () => {
+    // SHELL_OPTION_LINE's fix for the `;` case above excluded only `;`, leaving
+    // `&&` and `||` open. `&&` is the more idiomatic joiner of the two under
+    // `set -e`, so this is the likelier authoring shape, not an edge case: a
+    // fixture that does real work past `&&` was still discarded as a no-op, with
+    // this rule named in the message telling its author the opposite of the truth.
+    const root = await bankCopy()
+    const fixture = 'tasks/storage/014-grow-home-lv/antisolutions/01-forgot-growfs.sh'
+    await writeFile(
+      join(root, fixture),
+      [
+        '#!/usr/bin/env bash',
+        '# expect-fail: fs-home-size',
+        'set -euo pipefail && sudo lvextend -L 12G /dev/rhel/home',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const r = await lint(root)
+    expect(r.err).not.toMatch(/nothing here but comments and shell options/)
+    expect(r.code).toBe(0)
+  })
+
   it('reports every problem in one pass rather than stopping at the first file', async () => {
     // Content authoring is a loop; one-error-per-run makes that loop slow. Same
     // reason ContentError aggregates.

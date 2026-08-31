@@ -164,9 +164,9 @@ function nonLiteralIds(script: string): string[] {
  * Deliberately narrow. This decides what `changesNothing` is allowed to *ignore*,
  * so widening it makes that rule fire more often — a false fail on the bank — while
  * keeping it narrow only ever leaves a no-op fixture unreported. The `[-+]` covers
- * both directions of an option, and `[^;]*$` anchors the match to the end of the
- * line: a real command joined on with `;` breaks the match, so the line is judged
- * as code rather than discarded with the option prefix.
+ * both directions of an option, and `[^;&|]*$` anchors the match to the end of the
+ * line: a real command joined on with `;`, `&&` or `||` breaks the match, so the
+ * line is judged as code rather than discarded with the option prefix.
  *
  * This used to be start-anchored only (`/^set\s+[-+]/`), with no trailing `$` and
  * no exclusion of `;`. `.test()` only needs a match to exist anywhere in the
@@ -175,8 +175,15 @@ function nonLiteralIds(script: string): string[] {
  * including the real command after the `;` — as a no-op. That is the opposite of
  * narrow: it silently swallowed a command the same way a start-anchor was meant to
  * keep out.
+ *
+ * Excluding only `;` left the two shell-idiomatic joiners open: a fixture body of
+ * `set -euo pipefail && sudo lvextend -L 12G /dev/rhel/home` still matched — `&&`
+ * is *more* idiomatic than `;` under `set -e`, so this was the likelier shape, not
+ * an edge case — and `changesNothing` discarded the real command after it, the
+ * identical false fail, with this rule named in the message. `[^;&|]*$` closes
+ * both `&&` and `||` the same way it closes `;`.
  */
-const SHELL_OPTION_LINE = /^set\s+[-+][^;]*$/
+const SHELL_OPTION_LINE = /^set\s+[-+][^;&|]*$/
 
 /**
  * Whether a fixture body could not have changed the machine: nothing in it but

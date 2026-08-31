@@ -342,4 +342,38 @@ describe('App, a rated mode', () => {
     expect(screen.queryByText(/Guided mode computes no rating/)).toBeNull()
     expect(screen.queryByText(/Rating \(not saved\)/)).toBeNull()
   })
+
+  it('withholds the rating on countDisputed alone, with incomplete and the total both clean', async () => {
+    // `reportUntrustworthy` reads three disjuncts, but the test above only ever
+    // drives `incomplete`. Dropping `report.countDisputed` from the disjunct
+    // (mutant M10) left the earlier suite green, because the App-level test for
+    // this pane used `incomplete: true` instead of the signal this pane's third
+    // disjunct actually exists for. This drives `countDisputed` alone -
+    // `incomplete: false` and `total === expectedTotal` - so a regression here
+    // is attributable to `countDisputed` and nothing else.
+    resetFake()
+    fake.finish.mockResolvedValueOnce({
+      id: 's1',
+      taskId: TASK_ID,
+      mode: 'practice',
+      rung: 1,
+      maxRung: 5,
+      checkpointTotal: 5,
+      startedAt: 0,
+      endedAt: 1,
+      phase: 'graded',
+      report: { ...REPORT, countDisputed: true },
+      rating: null,
+    })
+    await enterLab(/^Practice /)
+
+    key('F4')
+    await waitFor(() => expect(screen.getByText('5 / 5 passed')).toBeDefined())
+    key('F8')
+    await waitFor(() => expect(screen.getByText(/Attempt finished/)).toBeDefined())
+
+    expect(screen.getByText(/checkpoint count could not be trusted/)).toBeDefined()
+    expect(screen.queryByText(/Guided mode computes no rating/)).toBeNull()
+    expect(screen.queryByText(/Rating \(not saved\)/)).toBeNull()
+  })
 })

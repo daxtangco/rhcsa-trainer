@@ -9,6 +9,14 @@ export interface ExpectedFailure {
 
 const PHASES: readonly ExpectPhase[] = ['pre', 'post', 'both']
 
+// Exhaustive by construction, the same way `ladder.ts`'s `RUNGS` is: adding an
+// ExpectPhase fails to typecheck until it is listed here. Unlike `RUNGS`,
+// `PHASES`' own order carries no meaning — `isPhase` only ever tests membership
+// via `.some()` — so the reason it stays a `readonly ExpectPhase[]` rather than
+// converting to `Record<ExpectPhase, true>`, unlike the four sites this fix round
+// did convert, is consistency with `RUNGS` rather than an ordering need of its own.
+const _phasesExhaustive: Record<ExpectPhase, true> = { pre: true, post: true, both: true }
+
 function isPhase(v: string): v is ExpectPhase {
   return PHASES.some((p) => p === v)
 }
