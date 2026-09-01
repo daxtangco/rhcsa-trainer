@@ -58,9 +58,42 @@ fi
 VMRUN=${RHCSA_VMRUN:-'/mnt/c/Program Files (x86)/VMware/VMware Workstation/vmrun.exe'}
 SSH_USER=${RHCSA_SSH_USER:-student}
 KEY=${RHCSA_SSH_KEY:-$HOME/.ssh/rhcsa_lab}
-ISO=${RHCSA_ISO:-/mnt/c/ISO/rhel-9.6-x86_64-dvd.iso}
+# The point release moves (9.6, 9.8, ...) and the checklist only tells the user
+# where to put the ISO, not what to call it - so pin the location, not the
+# filename. A stale filename here makes a present ISO look absent, which lands
+# in step 4's silent-skip branch and leaves dnf broken in the guest.
+if [[ -z ${RHCSA_ISO:-} ]]; then
+  for candidate in /mnt/c/ISO/rhel-9*-x86_64-dvd.iso; do
+    if [[ -f $candidate ]]; then RHCSA_ISO=$candidate; break; fi
+  done
+fi
+ISO=${RHCSA_ISO:-/mnt/c/ISO/rhel-9-x86_64-dvd.iso}
+# Accept either form for RHCSA_ISO. The checklist shows RHCSA_VMX as a Windows
+# path, so a user will reasonably write one here too - and a Windows-form value
+# fails the `[[ -f ]]` test in step 4 without failing the script, which is the
+# worst outcome this script has: it skips the local repo and dnf is dead in the
+# guest. Normalise to a WSL path so the test means what it looks like it means.
+if [[ $ISO == [A-Za-z]:[\\/]* ]]; then ISO=$(wslpath -u "$ISO"); fi
 
 log() { printf '\n[provision] %s\n' "$*"; }
+# vmrun.exe is a Windows program and WSL does not translate path arguments for
+# Windows programs: a WSL or relative path reaches vmrun verbatim and is not a
+# path on Windows. Measured with PowerShell Test-Path - `/tmp/x/script.sh` is
+# False, its `wslpath -w` form is True. Every *host* path handed to vmrun goes
+# through this; guest paths must not, since the guest interprets those.
+# wslpath does the conversion rather than a substitution here because only it
+# knows the mount table: /mnt/c is a drive mount and becomes C:\, while /mnt/d
+# on a machine with no D: drive becomes a \\wsl.localhost UNC path. Choosing
+# the drive letter where one exists is also what keeps the 10 GB ISO copy off
+# the 9P share. readlink -f first, so a relative path resolves before it
+# converts.
+hostpath() {
+  if command -v wslpath >/dev/null 2>&1; then
+    wslpath -w "$(readlink -f "$1")"
+  else
+    printf '%s\n' "$1"
+  fi
+}
 # -gp puts RHCSA_GUEST_PASSWORD on the argv of every vmrun call below, which is
 # visible in this host's process list for the duration of that call - including
 # the multi-minute 10 GB copyFileFromHostToGuest at step 4. vmrun offers no
@@ -114,7 +147,7 @@ if [[ -f $ISO ]]; then
     echo "guest already has /var/lib/rhcsa-dvd.iso"
   else
     echo "copying $ISO into the guest (this takes several minutes)"
-    guest copyFileFromHostToGuest "$ISO" /tmp/rhcsa-dvd.iso
+    guest copyFileFromHostToGuest "$(hostpath "$ISO")" /tmp/rhcsa-dvd.iso
     guest runProgramInGuest /usr/bin/bash -c \
       "sudo mv /tmp/rhcsa-dvd.iso /var/lib/rhcsa-dvd.iso && sudo chmod 0444 /var/lib/rhcsa-dvd.iso"
   fi
@@ -125,7 +158,7 @@ fi
 
 # ---------------------------------------------------------------- 5. guest
 log "guest provisioning"
-guest copyFileFromHostToGuest scripts/guest-provision.sh /tmp/guest-provision.sh
+guest copyFileFromHostToGuest "$(hostpath scripts/guest-provision.sh)" /tmp/guest-provision.sh
 guest runProgramInGuest /usr/bin/bash -c \
   "RHCSA_PUBKEY='$PUBKEY' bash /tmp/guest-provision.sh"
 guest deleteFileInGuest /tmp/guest-provision.sh || true

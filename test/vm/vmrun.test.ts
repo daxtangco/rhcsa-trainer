@@ -65,6 +65,20 @@ describe('VmrunTransport', () => {
     expect(r.calls[1]).toContain('/usr/bin/bash')
   })
 
+  it('hands vmrun a host path Windows can open, not the raw staging path', async () => {
+    const r = recorder()
+    await new VmrunTransport(CFG, r.runner).exec('true')
+    // Second from the end: the host source, with the guest destination last.
+    const staged = r.calls[0]?.at(-2)
+
+    if (process.env.WSL_DISTRO_NAME) {
+      expect(staged).toMatch(/^([A-Za-z]:\\|\\\\)/)
+    } else {
+      // Off WSL there is nothing to convert, so the staging path arrives as-is.
+      expect(staged).toMatch(/script\.sh$/)
+    }
+  })
+
   it('passes guest credentials on every guest operation', async () => {
     const r = recorder()
     await new VmrunTransport(CFG, r.runner).exec('true')

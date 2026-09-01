@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { toWindowsPath } from './hostpath.ts'
 import type { ExecResult, LabTransport, TransportKind } from './transport.ts'
 
 const execFileAsync = promisify(execFile)
@@ -145,7 +146,11 @@ export class VmrunTransport implements LabTransport {
         'copyFileFromHostToGuest',
         this.#cfg.vmx,
         ...auth,
-        hostPath,
+        // vmrun.exe is a Windows program, so the *host* side of this copy has
+        // to be a path Windows can open — `hostPath` as written by mkdtemp
+        // cannot be (see toWindowsPath). The guest side stays POSIX: that one
+        // is interpreted by the guest, not by Windows.
+        await toWindowsPath(hostPath),
         guestPath,
       ])
 
