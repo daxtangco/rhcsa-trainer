@@ -31,7 +31,8 @@ RHCSA_SSH_USER=student
 #RHCSA_SSH_PORT=22
 #RHCSA_SSH_KEY=
 #RHCSA_TRANSPORT=
-# Quote any value containing a space.
+# Values are read literally: a Windows path needs no quoting and no doubled
+# backslashes. Quote only a value containing a space.
 # Path to vmrun.exe, if VMware is not in the default location:
 #RHCSA_VMRUN="/mnt/c/Program Files (x86)/VMware/VMware Workstation/vmrun.exe"
 # Read by this script only, never by the app itself - the DVD ISO's host path.
@@ -40,17 +41,49 @@ EOF
   echo "wrote a template .env.local - fill in RHCSA_VMX and RHCSA_GUEST_PASSWORD, then re-run"
 fi
 
-# Values already exported win over the file, and a blank key in the template
-# means "not supplied" - never "supplied as empty". Both matter: the checklist
-# documents exporting RHCSA_GUEST_PASSWORD for a single run instead of writing a
-# live VM credential to disk, and sourcing a blank template key would otherwise
-# wipe it and then blame the user for not setting it (measured: see
+# Read as data, not as shell.
+#
+# This used to `.` the filtered file with `set -a`, which silently corrupted the
+# one value that matters most: bash treats backslashes in an unquoted assignment
+# as escapes, so the RHCSA_VMX line the checklist tells the user to write,
+#     RHCSA_VMX=C:\VMs\rhcsa-lab\rhcsa-lab.vmx
+# arrived as `C:VMsrhcsa-labrhcsa-lab.vmx` and every vmrun call in this script
+# failed on a vmx path that does not exist (measured). The app never had this
+# bug - it reads the same file with node --env-file, which takes values
+# literally - so the file meant two different things to its two readers. Parsing
+# it the way node does makes it mean one thing, and means a Windows path needs
+# no quoting or doubling here.
+#
+# A blank key still means "not supplied", never "supplied as empty": the
+# checklist documents exporting RHCSA_GUEST_PASSWORD for a single run instead of
+# writing a live VM credential to disk, and a blank template key must not wipe
+# it and then blame the user for not setting it (measured: see
 # task-19-report.md).
 if [[ -f .env.local ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  . <(grep -vE '^[[:space:]]*#|^[[:space:]]*$|=[[:space:]]*$' .env.local)
-  set +a
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line =~ ^[[:space:]]*(#|$) ]] && continue
+    [[ $line == *=* ]] || continue
+    env_key=${line%%=*}
+    env_val=${line#*=}
+    env_key=${env_key//[[:space:]]/}
+    # Anything that is not a shell name is a malformed line, not a variable.
+    [[ $env_key =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    # Trim surrounding whitespace before the quote check, so `KEY = "a b"` works
+    # and a stray trailing space does not end up inside a path. node --env-file
+    # trims the same way; quotes are what protect an interior space.
+    env_val=${env_val#"${env_val%%[![:space:]]*}"}
+    env_val=${env_val%"${env_val##*[![:space:]]}"}
+    [[ -n $env_val ]] || continue
+    # Strip one layer of matching quotes, since the template tells the user to
+    # quote a value containing a space. Unquoted values stay verbatim.
+    if [[ ${#env_val} -ge 2 && $env_val == \"*\" ]]; then
+      env_val=${env_val:1:${#env_val}-2}
+    elif [[ ${#env_val} -ge 2 && $env_val == \'*\' ]]; then
+      env_val=${env_val:1:${#env_val}-2}
+    fi
+    export "$env_key=$env_val"
+  done < .env.local
+  unset line env_key env_val
 fi
 
 : "${RHCSA_VMX:?set RHCSA_VMX in .env.local - see docs/vm-build-checklist.md}"
