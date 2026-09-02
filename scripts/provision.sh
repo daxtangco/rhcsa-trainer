@@ -217,27 +217,35 @@ fi
 # attaches them per-task with vmware-vdiskmanager.
 log "spare disks: none by design (Phase 1)"
 
-# ------------------------------------------------------------------ 4. ISO
-log "local repo payload"
-if [[ -f $ISO ]]; then
-  # ~10 GB, so only copy it once.
-  # Do not trust vmrun's exit code to carry the guest program's: it reports
-  # that in prose on stdout instead (see src/engine/vm/vmrun.ts, GUEST_CODE_RE),
-  # so `test -f` alone would report success merely because vmrun ran it, not
-  # because the file exists. Make the guest say so instead.
-  if guest runProgramInGuest /usr/bin/bash -c \
-       'test -f /var/lib/rhcsa-dvd.iso && echo RHCSA_ISO_PRESENT' 2>/dev/null \
-       | grep -q RHCSA_ISO_PRESENT; then
-    echo "guest already has /var/lib/rhcsa-dvd.iso"
-  else
-    echo "copying $ISO into the guest (this takes several minutes)"
-    guest copyFileFromHostToGuest "$(hostpath "$ISO")" /tmp/rhcsa-dvd.iso
-    guest runProgramInGuest /usr/bin/bash -c \
-      "sudo mv /tmp/rhcsa-dvd.iso /var/lib/rhcsa-dvd.iso && sudo chmod 0444 /var/lib/rhcsa-dvd.iso"
-  fi
+# ------------------------------------------------------------------ 4. DVD
+log "DVD repo attachment"
+# Nothing is copied any more. The DVD is attached to the VM as a CD-ROM device
+# and mounted read-only inside the guest by guest-provision.sh, which carries the
+# full reasoning. The short version: the 9.8 DVD is 14.47 GiB, /var is 2 GiB,
+# /tmp (on /) has 9.8 GiB free, and the VG has 15.00 GiB free in total - the copy
+# fit nowhere, and making it fit would have consumed the exact free extents the
+# LVM tasks exist to exercise.
+#
+# The old code here also could not have detected an already-copied ISO: it piped
+# runProgramInGuest into `grep`, and vmrun does not return the guest program's
+# stdout (see guest_ready above), so it would have re-copied 14.47 GiB on every
+# single run.
+#
+# This step now only checks the host side of the attachment. A missing or
+# unreferenced ISO shows up in the guest as "dnf has no repo", which sends the
+# reader looking in the wrong machine entirely.
+VMX_WSL=$RHCSA_VMX
+if [[ $VMX_WSL == [A-Za-z]:[\\/]* ]]; then VMX_WSL=$(wslpath -u "$RHCSA_VMX"); fi
+if [[ ! -f $ISO ]]; then
+  echo "WARNING: no ISO at $ISO - set RHCSA_ISO in .env.local."
+  echo "         Until that is fixed the guest has no dnf repo at all."
+elif ! grep -qiF "$(hostpath "$ISO")" "$VMX_WSL" 2>/dev/null; then
+  echo "WARNING: $ISO exists, but the vmx does not reference it."
+  echo "         Attach it in VMware: VM > Settings > CD/DVD > Use ISO image file,"
+  echo "         and tick 'Connect at power on'. The guest mounts it from there."
 else
-  echo "WARNING: $ISO not found. Set RHCSA_ISO. Skipping the local repo -"
-  echo "         dnf will not work in the guest until this is fixed."
+  echo "  attached: $(hostpath "$ISO")"
+  echo "  mounted read-only in the guest; nothing is copied into the VM"
 fi
 
 # ---------------------------------------------------------------- 5. guest

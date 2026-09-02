@@ -48,40 +48,103 @@ fi
 # This is the single most common cause of "key installed but still prompted".
 sudo restorecon -R "$HOME/.ssh"
 
-# ------------------------------------------------------------- local repo
-# An ISO-backed repo inside the VM's own disk. No subscription, no network,
-# and it cannot vanish when the CD-ROM device is detached.
-ISO_MNT=/var/lib/rhcsa-repo
-if ! mountpoint -q "$ISO_MNT"; then
-  if [[ -f /var/lib/rhcsa-dvd.iso ]]; then
-    sudo mkdir -p "$ISO_MNT"
-    # fstab entry makes it survive reboots, which the grader's verdict B needs.
-    if ! grep -q "$ISO_MNT" /etc/fstab; then
-      echo "/var/lib/rhcsa-dvd.iso $ISO_MNT iso9660 loop,ro,nofail 0 0" | sudo tee -a /etc/fstab >/dev/null
+# --------------------------------------------------------- DVD-backed repo
+# The RHEL DVD is attached to this VM as a CD-ROM device and mounted read-only.
+# It is deliberately NOT copied into the guest, which is what this script used
+# to do: the 9.8 DVD is 14.47 GiB, /var is 2 GiB, /tmp (on /) has 9.8 GiB free,
+# and the volume group has 15.00 GiB free in total - so the copy could not fit
+# anywhere, and making it fit would consume the entire resource the LVM tasks
+# exist to exercise (all measured against the real VM, 2026-09-02). Mounting the
+# attached disc costs zero guest disk and leaves VFree untouched.
+#
+# The device is found by *content*, not by name or label. /dev/sr0 on this VM is
+# Easy Install's autoinst.iso and the DVD is /dev/sr1, but that ordering is not
+# guaranteed; and the label carries the point release
+# (LABEL=RHEL-9-8-0-BaseOS-x86_64), so matching on it would silently break at
+# 9.9. fstab then keys on UUID, which is stable for a given ISO and
+# unambiguous between the two discs.
+#
+# `nofail` matters: without it, a missing or moved ISO turns a routine boot into
+# an emergency shell, and the VM's whole value is that it boots unattended.
+DVD_MNT=/mnt/rhcsa-dvd
+DVD_OK=0
+
+find_dvd() {
+  local dev probe
+  probe=$(mktemp -d)
+  for dev in /dev/sr*; do
+    [[ -b $dev ]] || continue
+    if sudo mount -o ro "$dev" "$probe" 2>/dev/null; then
+      if [[ -d $probe/BaseOS/repodata && -d $probe/AppStream/repodata ]]; then
+        sudo umount "$probe"
+        rmdir "$probe"
+        printf '%s\n' "$dev"
+        return 0
+      fi
+      sudo umount "$probe"
     fi
-    sudo systemctl daemon-reload
-    sudo mount "$ISO_MNT"
-    log "mounted local DVD image at $ISO_MNT"
-  else
-    log "WARNING: /var/lib/rhcsa-dvd.iso is missing; skipping local repo"
-  fi
+  done
+  rmdir "$probe"
+  return 1
+}
+
+# Drop the abandoned design's fstab line before adding ours, or a reboot tries
+# to loop-mount an ISO that is no longer there.
+if grep -q '/var/lib/rhcsa-repo' /etc/fstab; then
+  sudo sed -i '\|/var/lib/rhcsa-repo|d' /etc/fstab
+  log "removed the stale /var/lib/rhcsa-repo fstab entry"
+fi
+if [[ -f /var/lib/rhcsa-dvd.iso ]]; then
+  log "NOTE: /var/lib/rhcsa-dvd.iso is a leftover from the old copy-in design."
+  log "      Nothing uses it now. Reclaim its space with: sudo rm -f /var/lib/rhcsa-dvd.iso"
 fi
 
-if mountpoint -q "$ISO_MNT"; then
-  sudo tee /etc/yum.repos.d/rhcsa-local.repo >/dev/null <<EOF
+if mountpoint -q "$DVD_MNT" && [[ -d $DVD_MNT/BaseOS/repodata ]]; then
+  log "DVD already mounted at $DVD_MNT"
+  DVD_OK=1
+elif DVD_DEV=$(find_dvd); then
+  DVD_UUID=$(sudo blkid -o value -s UUID "$DVD_DEV")
+  sudo mkdir -p "$DVD_MNT"
+  # Replace any previous entry for this mountpoint rather than appending a
+  # second: this script is idempotent, and the UUID changes with the release.
+  sudo sed -i "\|[[:space:]]$DVD_MNT[[:space:]]|d" /etc/fstab
+  printf 'UUID=%s %s iso9660 ro,nofail 0 0\n' "$DVD_UUID" "$DVD_MNT" |
+    sudo tee -a /etc/fstab >/dev/null
+  sudo systemctl daemon-reload
+  sudo mount "$DVD_MNT"
+  log "mounted $DVD_DEV (UUID=$DVD_UUID) at $DVD_MNT"
+  DVD_OK=1
+else
+  log "WARNING: no attached disc holds BaseOS/repodata, so dnf has no repo."
+  log "         Check that the RHEL DVD ISO is attached to the VM as a CD-ROM"
+  log "         device and connected (vmx: sata0:1.fileName / .present)."
+fi
+
+if ((DVD_OK)); then
+  # gpgcheck=1, with the key that ships on the disc. The old repo file used
+  # gpgcheck=0; the exam expects a student to reason about package signing, and
+  # a lab repo that skips it quietly teaches the wrong habit. The key is on the
+  # DVD, so this still needs no network and no subscription.
+  sudo tee /etc/yum.repos.d/rhcsa-dvd.repo >/dev/null <<EOF
 [rhcsa-baseos]
-name=RHCSA local BaseOS
-baseurl=file://$ISO_MNT/BaseOS
+name=RHEL DVD - BaseOS
+baseurl=file://$DVD_MNT/BaseOS
 enabled=1
-gpgcheck=0
+gpgcheck=1
+gpgkey=file://$DVD_MNT/RPM-GPG-KEY-redhat-release
 
 [rhcsa-appstream]
-name=RHCSA local AppStream
-baseurl=file://$ISO_MNT/AppStream
+name=RHEL DVD - AppStream
+baseurl=file://$DVD_MNT/AppStream
 enabled=1
-gpgcheck=0
+gpgcheck=1
+gpgkey=file://$DVD_MNT/RPM-GPG-KEY-redhat-release
 EOF
-  log "wrote /etc/yum.repos.d/rhcsa-local.repo"
+  sudo rpm --import "$DVD_MNT/RPM-GPG-KEY-redhat-release"
+  # The old repo file names a mountpoint that no longer exists. Left in place it
+  # fails every dnf transaction, which would read as "the trainer broke dnf".
+  sudo rm -f /etc/yum.repos.d/rhcsa-local.repo
+  log "wrote /etc/yum.repos.d/rhcsa-dvd.repo (gpgcheck=1, key from disc)"
 fi
 
 # -------------------------------------------------------------- packages
