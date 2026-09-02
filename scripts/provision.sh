@@ -93,8 +93,9 @@ SSH_USER=${RHCSA_SSH_USER:-student}
 KEY=${RHCSA_SSH_KEY:-$HOME/.ssh/rhcsa_lab}
 # The point release moves (9.6, 9.8, ...) and the checklist only tells the user
 # where to put the ISO, not what to call it - so pin the location, not the
-# filename. A stale filename here makes a present ISO look absent, which lands
-# in step 4's silent-skip branch and leaves dnf broken in the guest.
+# filename. Since the DVD-repo change this value is advisory: the guest mounts
+# whatever disc is attached to the VM and does not consult RHCSA_ISO, so a stale
+# filename here costs a spurious step 4 warning, not a broken dnf.
 if [[ -z ${RHCSA_ISO:-} ]]; then
   for candidate in /mnt/c/ISO/rhel-9*-x86_64-dvd.iso; do
     if [[ -f $candidate ]]; then RHCSA_ISO=$candidate; break; fi
@@ -103,9 +104,9 @@ fi
 ISO=${RHCSA_ISO:-/mnt/c/ISO/rhel-9-x86_64-dvd.iso}
 # Accept either form for RHCSA_ISO. The checklist shows RHCSA_VMX as a Windows
 # path, so a user will reasonably write one here too - and a Windows-form value
-# fails the `[[ -f ]]` test in step 4 without failing the script, which is the
-# worst outcome this script has: it skips the local repo and dnf is dead in the
-# guest. Normalise to a WSL path so the test means what it looks like it means.
+# fails the `[[ -f ]]` test in step 4 without failing the script, so step 4 would
+# report the ISO missing while it sits right where the user put it. Normalise to
+# a WSL path so the test means what it looks like it means.
 if [[ $ISO == [A-Za-z]:[\\/]* ]]; then ISO=$(wslpath -u "$ISO"); fi
 
 log() { printf '\n[provision] %s\n' "$*"; }
