@@ -132,7 +132,13 @@ hostpath() {
 # the multi-minute 10 GB copyFileFromHostToGuest at step 4. vmrun offers no
 # other way to authenticate (src/engine/vm/vmrun.ts documents the same limit);
 # noted here so a reader knows, not because this script can fix it.
-guest() { "$VMRUN" "$1" "$RHCSA_VMX" -gu "$SSH_USER" -gp "$RHCSA_GUEST_PASSWORD" "${@:2}"; }
+# -gu/-gp are AUTHENTICATION-FLAGS, and `vmrun` with no arguments states the rule
+# outright: "These must appear before the command and any command parameters."
+# They used to sit after the vmx here, so vmrun parsed them as command
+# parameters instead - it prompted for guest credentials interactively and then
+# handed `-gu` to copyFileFromHostToGuest as the host path, failing with
+# "The file name is not valid" (measured against real vmrun 1.17.0).
+guest() { "$VMRUN" -gu "$SSH_USER" -gp "$RHCSA_GUEST_PASSWORD" "$1" "$RHCSA_VMX" "${@:2}"; }
 
 # ------------------------------------------------------------------ 1. key
 log "SSH key"

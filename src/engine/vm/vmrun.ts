@@ -133,6 +133,22 @@ export class VmrunTransport implements LabTransport {
     this.#run = run
   }
 
+  /**
+   * Builds argv for a guest operation with the auth flags in the one position
+   * vmrun accepts them.
+   *
+   * `vmrun` with no arguments states the rule: "AUTHENTICATION-FLAGS ... must
+   * appear before the command and any command parameters." Passing them after
+   * the vmx path does not merely fail — vmrun prompts for guest credentials on
+   * the terminal and then consumes `-gu` as the command's first parameter, so
+   * `copyFileFromHostToGuest` reported "The file name is not valid" about a
+   * flag (measured against real vmrun 1.17.0). Every guest op goes through
+   * here so that ordering lives in one place rather than at three call sites.
+   */
+  #guestArgv(command: string, ...params: string[]): string[] {
+    return [...guestAuth(this.#cfg), command, this.#cfg.vmx, ...params]
+  }
+
   async exec(script: string): Promise<ExecResult> {
     const dir = await mkdtemp(join(tmpdir(), 'rhcsa-stage-'))
     const hostPath = join(dir, 'script.sh')
@@ -140,31 +156,27 @@ export class VmrunTransport implements LabTransport {
     await writeFile(hostPath, script, 'utf8')
 
     try {
-      const auth = guestAuth(this.#cfg)
+      await this.#run(
+        this.#cfg.vmrun,
+        this.#guestArgv(
+          'copyFileFromHostToGuest',
+          // vmrun.exe is a Windows program, so the *host* side of this copy has
+          // to be a path Windows can open — `hostPath` as written by mkdtemp
+          // cannot be (see toWindowsPath). The guest side stays POSIX: that one
+          // is interpreted by the guest, not by Windows.
+          await toWindowsPath(hostPath),
+          guestPath,
+        ),
+      )
 
-      await this.#run(this.#cfg.vmrun, [
-        'copyFileFromHostToGuest',
-        this.#cfg.vmx,
-        ...auth,
-        // vmrun.exe is a Windows program, so the *host* side of this copy has
-        // to be a path Windows can open — `hostPath` as written by mkdtemp
-        // cannot be (see toWindowsPath). The guest side stays POSIX: that one
-        // is interpreted by the guest, not by Windows.
-        await toWindowsPath(hostPath),
-        guestPath,
-      ])
-
-      const result = await this.#run(this.#cfg.vmrun, [
-        'runProgramInGuest',
-        this.#cfg.vmx,
-        ...auth,
+      const result = await this.#run(
+        this.#cfg.vmrun,
         // No -noWait / -activeWindow / -interactive: those are bare presence
         // flags, not `=false` assignments, and blocking until the guest program
         // exits is already vmrun's default. Passing them as `flag=false` is a
         // syntax error, not a no-op.
-        '/usr/bin/bash',
-        guestPath,
-      ])
+        this.#guestArgv('runProgramInGuest', '/usr/bin/bash', guestPath),
+      )
 
       const reported = GUEST_CODE_RE.exec(`${result.stdout}\n${result.stderr}`)
       const code = reported ? Number(reported[1]) : result.code
@@ -173,12 +185,10 @@ export class VmrunTransport implements LabTransport {
     } finally {
       // Best effort: a leftover /tmp script is harmless, a thrown cleanup
       // error would mask the real result.
-      await this.#run(this.#cfg.vmrun, [
-        'deleteFileInGuest',
-        this.#cfg.vmx,
-        ...guestAuth(this.#cfg),
-        guestPath,
-      ]).catch(() => undefined)
+      await this.#run(
+        this.#cfg.vmrun,
+        this.#guestArgv('deleteFileInGuest', guestPath),
+      ).catch(() => undefined)
       await rm(dir, { recursive: true, force: true }).catch(() => undefined)
     }
   }

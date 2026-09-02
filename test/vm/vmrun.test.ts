@@ -54,15 +54,39 @@ describe('VmrunTransport', () => {
     expect(out.stdout).toBe('hello\n')
     expect(out.code).toBe(0)
 
-    expect(r.calls[0]?.[0]).toBe('copyFileFromHostToGuest')
-    expect(r.calls[0]?.[1]).toBe(CFG.vmx)
+    // The auth flags come first, so the command is not at index 0 — see the
+    // ordering test below for why that is not negotiable.
+    expect(r.calls[0]).toContain('copyFileFromHostToGuest')
+    expect(r.calls[0]).toContain(CFG.vmx)
     // guest destination is under /tmp and unique per exec. Asserted from the
-    // end of argv, not index 3: the guest auth flags sit in between, so the
-    // fixed index would land on the username.
+    // end of argv rather than a fixed index, which the auth flags would shift.
     expect(r.calls[0]?.at(-1)).toMatch(/^\/tmp\/rhcsa-[a-z0-9]+\.sh$/)
 
-    expect(r.calls[1]?.[0]).toBe('runProgramInGuest')
+    expect(r.calls[1]).toContain('runProgramInGuest')
     expect(r.calls[1]).toContain('/usr/bin/bash')
+  })
+
+  it('puts the auth flags before the command, as vmrun requires', async () => {
+    // vmrun's own usage: "AUTHENTICATION-FLAGS ... must appear before the
+    // command and any command parameters." Violating it does not fail cleanly —
+    // real vmrun 1.17.0 prompted for guest credentials on the terminal, then
+    // took `-gu` as copyFileFromHostToGuest's host path and reported "The file
+    // name is not valid" about a flag. Nothing off a fake transport can catch
+    // that, so the ordering is asserted directly.
+    const r = recorder()
+    await new VmrunTransport(CFG, r.runner).exec('true')
+
+    const GUEST_COMMANDS = ['copyFileFromHostToGuest', 'runProgramInGuest', 'deleteFileInGuest']
+    expect(r.calls).toHaveLength(3)
+
+    for (const call of r.calls) {
+      const command = call.findIndex((a) => GUEST_COMMANDS.includes(a))
+      expect(command).toBeGreaterThan(-1)
+      expect(call.indexOf('-gu')).toBeLessThan(command)
+      expect(call.indexOf('-gp')).toBeLessThan(command)
+      // The vmx is a command parameter, so it follows the command too.
+      expect(call.indexOf(CFG.vmx)).toBeGreaterThan(command)
+    }
   })
 
   it('hands vmrun a host path Windows can open, not the raw staging path', async () => {
@@ -113,7 +137,7 @@ describe('VmrunTransport', () => {
     ])
     await new VmrunTransport(CFG, r.runner).exec('false')
     const last = r.calls.at(-1)
-    expect(last?.[0]).toBe('deleteFileInGuest')
+    expect(last).toContain('deleteFileInGuest')
   })
 
   it('isAvailable is true only when the vmx appears in vmrun list', async () => {
@@ -180,7 +204,8 @@ describe('VmController', () => {
   it('reboot polls until the guest answers, rather than sleeping once', async () => {
     let probes = 0
     const runner = async (_e: string, args: string[]): Promise<ExecResult> => {
-      if (args[0] === 'runProgramInGuest') {
+      // Not args[0]: the guest auth flags precede the command in vmrun's argv.
+      if (args.includes('runProgramInGuest')) {
         probes += 1
         // Probe 1 is consumed by reboot's own reboot command. Probe 2 is
         // waitForGuest's first attempt and must fail, so that reaching probe 3
