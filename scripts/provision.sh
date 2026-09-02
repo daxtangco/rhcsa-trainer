@@ -245,7 +245,11 @@ elif ! grep -qiF "$(hostpath "$ISO")" "$VMX_WSL" 2>/dev/null; then
   echo "         Attach it in VMware: VM > Settings > CD/DVD > Use ISO image file,"
   echo "         and tick 'Connect at power on'. The guest mounts it from there."
 else
-  echo "  attached: $(hostpath "$ISO")"
+  # printf, not echo: this is the one line in the script that prints a Windows
+  # path, and a backslash path through `echo` is only safe because this file runs
+  # under bash. Under zsh (or bash with xpg_echo) `C:\Users\...\rhel-...` prints
+  # as `C: sers\...hel-...` - \U, \D and \r all consumed as escapes. Measured.
+  printf '  attached: %s\n' "$(hostpath "$ISO")"
   echo "  mounted read-only in the guest; nothing is copied into the VM"
 fi
 
