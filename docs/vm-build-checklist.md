@@ -11,9 +11,14 @@ no subscription and no network):
 1. Sign in at <https://developers.redhat.com/products/rhel/download> with your
    own Red Hat account. A **Red Hat Developer Subscription for Individuals** is
    free and entitles one system.
-2. Download `rhel-9.x-x86_64-dvd.iso` (~10 GB).
+2. Download `rhel-9.x-x86_64-dvd.iso`. It is large and getting larger: the 9.8
+   DVD is **14.5 GB**, not the ~10 GB this line used to claim. That stale figure
+   is what made an earlier design try to copy the ISO into the VM's own disk,
+   where it could never have fit.
 3. Save it to `C:\ISO\` so it is reachable from both Windows and WSL at
-   `/mnt/c/ISO/`.
+   `/mnt/c/ISO/`. This is the path the `.vmx` CD-ROM device points at, and
+   `provision.sh` looks here when `RHCSA_ISO` is unset. Keep it here: moving it
+   detaches the DVD, and the DVD *is* the guest's `dnf` repo.
 
 Nothing in this project needs your Red Hat credentials. Do not put them in a
 file in this repo.
