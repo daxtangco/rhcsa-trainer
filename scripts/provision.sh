@@ -140,6 +140,36 @@ hostpath() {
 # "The file name is not valid" (measured against real vmrun 1.17.0).
 guest() { "$VMRUN" -gu "$SSH_USER" -gp "$RHCSA_GUEST_PASSWORD" "$1" "$RHCSA_VMX" "${@:2}"; }
 
+# The only honest readiness test for the guest ops in steps 4-6: run a guest
+# *program* and require its output. Everything cheaper lies.
+#
+# getGuestIPAddress does not test this. It answers from VMware's cached guest
+# state, so on 2026-09-02 it printed "guest tools are answering" against a VM
+# that Windows had suspended 95 minutes earlier (vmware.log: "PowerNotify:
+# System suspend detected" at 10:29Z, this script run at 12:04Z, "System resume
+# detected" 680ms *after* step 4 had already failed). Step 4's first real RPC
+# then died with GuestRpcSendTimedOut, which vmrun reports as the thoroughly
+# misleading "VMware Tools are not running in the guest" - Tools was running the
+# whole time and reported a 5685-second collection gap once it thawed.
+#
+# Retrying rather than probing once is the point: a host resume takes tens of
+# seconds to thaw, and there is nothing to gain from starting a 10 GB copy
+# before the guest can answer.
+guest_ready() {
+  guest runProgramInGuest /usr/bin/bash -c 'echo RHCSA_GUEST_READY' 2>/dev/null |
+    grep -q RHCSA_GUEST_READY
+}
+# $1 = seconds to wait. Returns non-zero on timeout rather than exiting, so the
+# caller decides whether this barrier is fatal.
+wait_for_guest() {
+  local deadline=$((SECONDS + ${1:-300}))
+  while ((SECONDS < deadline)); do
+    if guest_ready; then return 0; fi
+    sleep 5
+  done
+  return 1
+}
+
 # ------------------------------------------------------------------ 1. key
 log "SSH key"
 if [[ ! -f $KEY ]]; then
@@ -154,16 +184,25 @@ PUBKEY=$(cat "$KEY.pub")
 # ---------------------------------------------------------------- 2. power
 log "power on"
 "$VMRUN" start "$RHCSA_VMX" nogui || true
-# Only a boot barrier - the IP is captured later, after open-vm-tools exists.
-# A fresh VM has no open-vm-tools yet (guest-provision.sh installs it below),
-# and getGuestIPAddress -wait against a guest without it hangs indefinitely
-# rather than failing: measured in Task 16, see docs/r1-findings.md. So bound
-# it and carry on; vmrun's guest ops do not need the IP.
-if timeout 120 "$VMRUN" getGuestIPAddress "$RHCSA_VMX" -wait >/dev/null 2>&1; then
-  echo "guest tools are answering"
+# A boot barrier, and a hard prerequisite check. This used to say that the guest
+# ops below "do not need" open-vm-tools and continue on failure. That was simply
+# wrong: every vmrun guest operation - copyFileFromHostToGuest, runProgramInGuest,
+# deleteFileInGuest - is carried by Tools' GuestRpc channel, so steps 4, 5 and 6
+# cannot run without it. Continuing anyway just moved the failure to step 4 and
+# dressed it up as a file-copy problem.
+echo "waiting for guest operations to answer"
+if wait_for_guest 300; then
+  echo "guest operations are answering"
 else
-  echo "guest tools did not answer within 120s - expected on a first run, before"
-  echo "open-vm-tools is installed. Continuing; the guest ops below do not need it."
+  echo "guest operations did not answer within 300s." >&2
+  echo "Every step below needs them, so stopping here rather than failing later" >&2
+  echo "with a misleading error. Check, in this order:" >&2
+  echo "  1. Is the Windows host awake? A suspended host pauses the VM, and the" >&2
+  echo "     first guest op then times out as 'VMware Tools are not running'." >&2
+  echo "  2. Is the guest booted to a login prompt? Check the Workstation console." >&2
+  echo "  3. In the guest: systemctl is-active vmtoolsd (checklist §3.3 enables it)." >&2
+  echo "  4. Is RHCSA_GUEST_PASSWORD in .env.local the current student password?" >&2
+  exit 1
 fi
 
 # --------------------------------------------------------- 3. spare disks
