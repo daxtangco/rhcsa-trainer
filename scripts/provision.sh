@@ -155,9 +155,15 @@ guest() { "$VMRUN" -gu "$SSH_USER" -gp "$RHCSA_GUEST_PASSWORD" "$1" "$RHCSA_VMX"
 # Retrying rather than probing once is the point: a host resume takes tens of
 # seconds to thaw, and there is nothing to gain from starting a 10 GB copy
 # before the guest can answer.
+# Exit status, NOT output. vmrun's runProgramInGuest does not return the guest
+# program's stdout: the guest program inherits vmtoolsd's stdout, so its output
+# lands in the guest's journal and never crosses back to the host. This probe
+# used to `grep` for a string the guest echoed, and it failed 92 consecutive
+# times against a completely healthy guest - the guest journal recorded 92
+# successful runs over the same wall-clock window, and vmware-vmsvc-root.log
+# recorded `VixToolsRunProgramImpl returning 0` for every one of them.
 guest_ready() {
-  guest runProgramInGuest /usr/bin/bash -c 'echo RHCSA_GUEST_READY' 2>/dev/null |
-    grep -q RHCSA_GUEST_READY
+  guest runProgramInGuest /usr/bin/true >/dev/null 2>&1
 }
 # $1 = seconds to wait. Returns non-zero on timeout rather than exiting, so the
 # caller decides whether this barrier is fatal.
