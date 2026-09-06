@@ -79,30 +79,32 @@ These live in `.env.local` at the repo root, which is git-ignored.
 | `RHCSA_PORT` | API port | `5175` |
 | `RHCSA_CONTENT` | content bank root | `content` |
 
-> Leave a key out of `.env.local` rather than setting it blank. `npm run test:vm`
-> exports every line it finds, and an exported empty value overrides the default
-> shown above instead of falling back to it.
+> Leave a key out of `.env.local` rather than setting it blank. Every loader
+> sets an empty value as the empty string, which overrides the default shown
+> above instead of falling back to it.
 
-**Quote any value containing a space.** `RHCSA_VMX`, `RHCSA_VMRUN` and
-`RHCSA_ISO` all commonly hold Windows paths under `/mnt/c/Program Files/...`.
-`scripts/provision.sh:34` says this too, but it sits directly above the
-`RHCSA_VMRUN` line and reads like advice about that one key. It is a house rule
-for the whole file.
+**Values are read literally, to the end of the line.** A Windows path needs no
+quoting and no doubled backslashes: write `RHCSA_VMX=C:\VMs\rhcsa-lab\rhcsa-lab.vmx`
+exactly as the checklist shows it, spaces and all. Quote a value only to protect
+a leading or trailing space you actually want.
 
-It matters more than a style rule, because the two loaders disagree. Measured:
-`RHCSA_VMX=/mnt/c/Program Files/VM/lab.vmx`, unquoted, is read correctly by
-`node --env-file-if-exists` — so `npm run dev:server` and `npm run validate`
-work. But `npm run test:vm` sources the file with `. ./.env.local` under
-`/bin/sh`, which is dash, and dash splits on the space and tries to *run*
-`Files/VM/lab.vmx`. It prints one `not found` line to stderr, leaves `RHCSA_VMX`
-**empty**, carries on to the next line, and exits 0. The suite then fails for a
-reason that has nothing to do with the space. Quoting the value fixes it; the
-same line quoted survives intact under both loaders.
+That is true because every npm script now loads the file the same way, through
+`node --env-file-if-exists=.env.local`. It was not always true, and the history
+is worth keeping so it is not reintroduced: `test:vm` used to source the file
+with `set -a; . ./.env.local`, and `/bin/sh` here is dash, which reads an
+unquoted assignment as an escape sequence. Measured — the very
+`RHCSA_VMX=C:\VMs\rhcsa-lab\rhcsa-lab.vmx` line `scripts/provision.sh` writes
+into the template arrived as `C:VMsrhcsa-labrhcsa-lab.vmx`, a path that does not
+exist, with no error and no empty value to give the game away. A path holding a
+space failed differently and more loudly: dash split on it and tried to *run*
+`Files/VM/lab.vmx`, printing one `not found` to stderr, leaving the key empty,
+and exiting 0. Either way the suite failed for a reason unrelated to its
+subject. `provision.sh` fixed the same bug in its own parser earlier by reading
+the file as data rather than as shell; this is the last consumer that had it.
 
-The npm scripts load `.env.local` for you — `node --env-file-if-exists` for
-the API and the CLI, `set -a; . ./.env.local` for `test:vm`. If you run
-`node src/cli/index.ts` directly, pass `--env-file-if-exists=.env.local`
-yourself or it will exit saying `RHCSA_VMX is not set`.
+If you run `node src/cli/index.ts` directly, pass
+`--env-file-if-exists=.env.local` yourself or it will exit saying
+`RHCSA_VMX is not set`.
 
 Nothing here needs your Red Hat credentials. Do not put them in a file in
 this repo.

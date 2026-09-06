@@ -9,7 +9,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:vm": "[ -f .env.local ] && { set -a; . ./.env.local; set +a; }; RHCSA_VM=1 vitest run .vm.test.ts",
+    "test:vm": "RHCSA_VM=1 node --env-file-if-exists=.env.local ./node_modules/vitest/vitest.mjs run .vm.test.ts",
     "typecheck": "tsc --noEmit",
     "rhcsa": "node --env-file-if-exists=.env.local src/cli/index.ts",
     "validate": "node --env-file-if-exists=.env.local src/cli/index.ts validate",
