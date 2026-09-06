@@ -1,7 +1,11 @@
 # RHEL 10 / EX200 objective taxonomy - the enumeration of risk R2.
 #
-# Nothing loads this file yet. It exists so the RHEL 9 -> RHEL 10 delta is
-# enumerated rather than guessed (spec 16, Phase 0).
+# Nothing loads this file but its golden test, and that is now settled rather
+# than pending: on 2026-09-06 the user chose RHEL 9, being the exam they will
+# sit and the edition in use at their work. objectives.yaml drives all
+# authoring; this file is contingency. It exists so the RHEL 9 -> RHEL 10 delta
+# is enumerated rather than guessed (spec 16, Phase 0) if that ever has to
+# change. docs/exit-criterion.md records what choosing RHEL 9 costs.
 #
 # READ THIS FIRST - the delta is larger than the plan assumed, and in one
 # direction the plan was wrong:

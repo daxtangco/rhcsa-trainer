@@ -246,10 +246,27 @@ If a fixture fails, fix the content, not the assertion.
 - The exam duration and passing score in `src/engine/exam/limits.ts` — 150
   minutes, 210 of 300 — are **UNCONFIRMED against Red Hat's published
   policy** and are marked as such in the source. Nothing gates on them yet.
-- The RHEL 9 versus RHEL 10 taxonomy decision is **open**. Both objective
-  files ship (`content/objectives.yaml`, `content/objectives-rhel10.yaml`)
-  and tasks carry `editions:`, but which edition drives bulk Phase 2
-  authoring is not decided.
+- The RHEL 9 versus RHEL 10 taxonomy decision is **settled: RHEL 9**, decided
+  by the user on 2026-09-06 — RHEL 9 is the exam they will sit and the edition
+  in use at their work. `content/objectives.yaml` is therefore the taxonomy
+  that drives Phase 2 authoring, which is also what the code already does:
+  `src/engine/content/bank.ts` loads that file and no other.
+
+  What the choice costs, stated so it is not rediscovered as a surprise:
+  Red Hat's published EX200 objectives page is *already* the RHEL 10 set (62
+  bullets, fetched 2026-08-30), so `objectives.yaml`'s wording rests on the
+  RHCSA 9 Cert Guide rather than on a currently-published contract. Ten
+  bullets are RHEL 9 only and stay in scope — the eight `containers.*`, plus
+  `files.permissions.set-gid` and `selinux.troubleshoot.violations`. Four are
+  RHEL 10 only and are out of scope: the RPM and Flatpak "Manage software"
+  bullets, which could not be practised on this RHEL 9.8 guest anyway. Six
+  more differ only in wording and id between the editions.
+
+  `content/objectives-rhel10.yaml` stays where it is, loaded by nothing but
+  its golden test. It is now R2 contingency: if the exam is ever retired
+  under this project, the delta is already enumerated rather than guessed.
+  The `editions:` field on tasks stays too — it is how a task records that
+  its material is durable across the boundary.
 - R1 — can WSL2 reach a VMnet8 guest over TCP/22 — remains **INCONCLUSIVE**.
   The guest half was never run, because there is no guest. See
   `docs/r1-findings.md`. A related sharp edge in `scripts/r1-probe.sh`: the
