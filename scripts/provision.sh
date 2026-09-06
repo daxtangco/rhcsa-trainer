@@ -313,9 +313,13 @@ if printf '%s\n' "$existing" | grep -qx 'clean'; then
   "$VMRUN" deleteSnapshot "$RHCSA_VMX" clean
 fi
 
-# Taken WHILE RUNNING, so memory is included and reverts take ~5s instead of
-# a 30s+ cold boot. This is the single biggest factor in how many tasks get
-# attempted per session.
+# Taken WHILE RUNNING, so memory is included: the .vmem beside the .vmsn is the
+# guest's full RAM, and reverting restores it rather than cold-booting. This is
+# the single biggest factor in how many tasks get attempted per session.
+#
+# Measured 2026-09-06, end to end: revertToSnapshot + start + guest answering
+# SSH = ~12s. Note that revertToSnapshot leaves the VM powered off even for a
+# memory snapshot, so the start afterwards is required, not optional.
 "$VMRUN" snapshot "$RHCSA_VMX" clean
 echo "captured 'clean' (live, memory included)"
 

@@ -249,10 +249,22 @@ export class VmController {
 
   async revert(name: string): Promise<void> {
     await this.#run(this.#cfg.vmrun, ['revertToSnapshot', this.#cfg.vmx, name])
-    // A live-snapshot revert (the design's ~5s reset mechanism, spec §4) may
-    // leave the VM already running, in which case this start is expected to
-    // fail — and its failure is deliberately ignored either way. Unverified
-    // against real vmrun; the VM acceptance step is where that gets confirmed.
+    // VERIFIED against real vmrun 1.17.0 / Workstation 25.0.1 (2026-09-06).
+    // revertToSnapshot always leaves the VM POWERED OFF, even for a snapshot
+    // that includes memory — `vmrun list` reported 0 running immediately after.
+    // So this start is not a defensive no-op, it is required, and it resumes
+    // from the checkpoint rather than cold-booting. Measured: revert to guest
+    // answering SSH in ~12s total, ~11s of that inside this start. The design's
+    // "~5s" figure (spec §4) is optimistic; ~12s is the real number.
+    //
+    // Do NOT use the guest's `uptime -s` or `uptime -p` to decide whether a
+    // resume happened. Those derive from (wall clock now - /proc/uptime), and a
+    // resumed VM's clock gets resynced forward by VMware Tools, so they report
+    // a convincing but fictitious fresh boot time — that reading led to a wrong
+    // "it cold-booted" conclusion during this very verification. The signals
+    // that hold up: a single unchanged boot ID with the journal continuous
+    // across the revert, /proc/uptime far below the wall time since boot, and
+    // vmware.log's "Completed pending lazy checkpoint restore" + OS_Resume.
     await this.power()
   }
 
