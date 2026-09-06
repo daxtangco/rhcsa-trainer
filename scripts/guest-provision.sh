@@ -2,11 +2,11 @@
 # Runs INSIDE the lab VM. Idempotent: safe to run repeatedly.
 #
 # Delivered by scripts/provision.sh. By the time this runs, the passwordless-
-# sudo drop-in below already exists: docs/vm-build-checklist.md §5 has the
-# user install it by hand at the console, before provision.sh (this script's
-# caller) is ever invoked - and §5 says explicitly that nothing else needs to
-# be run by hand after that. So §0 below is not a first-run bootstrap step;
-# nobody is told to run this script at a console. It is an idempotent safety
+# sudo drop-in below already exists: docs/vm-build-checklist.md §3 step 5 has
+# the user install it by hand at the console, before provision.sh (this
+# script's caller) is ever invoked - and §3.5 says explicitly that nothing else
+# needs to be run by hand after that. So §0 below is not a first-run bootstrap
+# step; nobody is told to run this script at a console. It is an idempotent safety
 # net, and the recovery path if the VM is ever rebuilt from `golden`, where
 # the drop-in would be missing again.
 set -euo pipefail
@@ -26,7 +26,7 @@ sudo visudo -cf /etc/sudoers.d/rhcsa-trainer   # a malformed drop-in can lock ou
 # sudo -k discards the cached ticket from the `tee` password above. Without
 # it, `sudo -n true` would pass on that ticket regardless of whether the
 # NOPASSWD rule actually took effect, which is not the thing this check is
-# supposed to prove - docs/vm-build-checklist.md §5 explains this at length;
+# supposed to prove - docs/vm-build-checklist.md §3.5 explains this at length;
 # keep this line in sync with that one.
 sudo -k
 sudo -n true || { echo "FATAL: passwordless sudo is not in effect for student" >&2; exit 1; }
@@ -141,9 +141,14 @@ gpgcheck=1
 gpgkey=file://$DVD_MNT/RPM-GPG-KEY-redhat-release
 EOF
   sudo rpm --import "$DVD_MNT/RPM-GPG-KEY-redhat-release"
-  # The old repo file names a mountpoint that no longer exists. Left in place it
-  # fails every dnf transaction, which would read as "the trainer broke dnf".
-  sudo rm -f /etc/yum.repos.d/rhcsa-local.repo
+  # Both of these name a mountpoint that does not survive a reboot. Left in
+  # place either one fails every dnf transaction, which would read as "the
+  # trainer broke dnf". rhcsa-local.repo is the abandoned copy-in design's file;
+  # dvd.repo is the throwaway one docs/vm-build-checklist.md §3.3 has the user
+  # hand-write at the console to get open-vm-tools installed, pointing at a
+  # /mnt/dvd that is not in fstab. Removed only in this branch: with no working
+  # repo to replace them with, deleting them would leave the guest with none.
+  sudo rm -f /etc/yum.repos.d/rhcsa-local.repo /etc/yum.repos.d/dvd.repo
   log "wrote /etc/yum.repos.d/rhcsa-dvd.repo (gpgcheck=1, key from disc)"
 fi
 

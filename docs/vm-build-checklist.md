@@ -35,7 +35,7 @@ practisable. Do not "simplify" them.
 | Memory | 4096 MB | Enough for containers plus a desktop-free install. |
 | CPUs | 2 | `tuned` and `systemd` work is more realistic than on 1. |
 | Network | **NAT (VMnet8)** | Reachable from WSL2 without bridging to your corporate LAN. Risk R1 verifies this. |
-| Snapshot memory | **on** | Live snapshots restore in ~5 s. Cold boot is 30 s+. |
+| Snapshot memory | **on** | A revert resumes from saved RAM in ~12 s, measured, against a 30 s+ cold boot. |
 
 ## 1. Create the VM
 
@@ -63,7 +63,9 @@ practisable. Do not "simplify" them.
 
 ## 2. Partition during installation
 
-Power on. In Anaconda:
+**Power the VM on now.** Step 1.13 deliberately left it off; this is where that
+gets undone. It boots from the DVD into Anaconda, RHEL's installer, and every
+numbered item below is an Anaconda screen rather than something you type:
 
 1. **Language**: English. **Time**: your zone.
 2. **Software Selection**: **Server** (not "Server with GUI", not "Minimal
@@ -120,7 +122,9 @@ Log in as `student` at the console.
    ```
 
    `dnf` needs a repo. If the machine is unregistered and has no repo yet, mount
-   the DVD (still attached) and use it:
+   the DVD (still attached) and use it. If `/mnt/dvd` turns out to have no
+   `BaseOS` directory in it, you mounted the wrong disc — a second virtual CD
+   drive shifts the DVD along, so try `/dev/sr1`:
 
    ```bash
    sudo mkdir -p /mnt/dvd
@@ -141,8 +145,18 @@ Log in as `student` at the console.
    sudo dnf install -y open-vm-tools
    ```
 
-   `provision.sh` (Task 19) makes this repo permanent by copying the ISO into
-   the VM's disk; this mount is only to get `open-vm-tools` in place.
+   This repo is throwaway, and deliberately so: `/mnt/dvd` is not in `fstab`, so
+   the first reboot unmounts it and leaves `dvd.repo` pointing at an empty
+   directory, which makes every later `dnf` command fail. `provision.sh`
+   therefore deletes `dvd.repo` and replaces it with a permanent
+   `rhcsa-dvd.repo`: the DVD stays attached to the VM, and the guest mounts it
+   read-only at `/mnt/rhcsa-dvd` from an `fstab` entry keyed on the ISO's UUID,
+   so it survives reboots and does not care where on the host the file lives.
+
+   Nothing is copied into the VM. An earlier design tried to, and the arithmetic
+   never worked: the DVD is 14.5 GB, and copying it in would have eaten exactly
+   the free volume-group extents the LVM labs exist to exercise. So this hand
+   mount is only to get `open-vm-tools` in place.
 
 4. Check the IP address — this confirms DHCP worked over NAT, which is worth
    seeing before you leave the console. `provision.sh` (Task 19) does not need
@@ -152,9 +166,12 @@ Log in as `student` at the console.
    ip -4 addr show scope global
    ```
 
-5. Install passwordless `sudo` for `student`, **at the console, not over
-   ssh** — `sudo` prompts for `student`'s password the first time, and the
-   console is the only place that prompt can be answered:
+5. Install passwordless `sudo` for `student`, **at the console, not over ssh**.
+   Not because a `sudo` password prompt cannot be answered over ssh — it can, an
+   interactive ssh session is a terminal like any other. The reason is the
+   paragraph right after the commands: a malformed drop-in can lock `sudo` out
+   of this machine entirely, and the console is the only way back in once it
+   has.
 
    ```bash
    printf 'student ALL=(ALL) NOPASSWD: ALL\n' | sudo tee /etc/sudoers.d/rhcsa-trainer >/dev/null
@@ -178,7 +195,7 @@ Log in as `student` at the console.
    After this, every `sudo` in the guest — including every grader,
    setup script, solution and anti-solution the app runs — needs no password,
    and nothing in the project works without it. `scripts/provision.sh` (Task
-   19) does the rest of the guest configuration — the ssh key, the local
+   19) does the rest of the guest configuration — the ssh key, the DVD
    repo, the packages — automatically, so there is nothing else to run by
    hand here.
 
@@ -209,8 +226,10 @@ can always fall back to.
 ```
 
 `provision.sh` (Task 19) creates the `clean` snapshot — the live,
-memory-included one used for ~5 s task resets — after it finishes configuring
-the machine.
+memory-included one used for task resets — after it finishes configuring the
+machine. A revert takes about 12 s end to end, measured on 2026-09-06; note
+that `revertToSnapshot` leaves the VM powered off even for a memory snapshot,
+so the `start` afterwards is required rather than optional.
 
 **Never delete `golden`.** It is the only way back if `clean` is captured in a
 broken state.
