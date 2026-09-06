@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -109,18 +109,98 @@ function guestAuth(cfg: VmrunConfigSlice): string[] {
   return ['-gu', cfg.sshUser, '-gp', cfg.guestPassword ?? '']
 }
 
-function guestScriptPath(): string {
-  // Random rather than counter-derived: two processes (the server and the
-  // CLI) can run against the same guest, and two counters both starting at 1
-  // would collide on the same path — a silent clobber that looks like a
-  // flaky grader.
-  return `/tmp/rhcsa-${randomBytes(6).toString('hex')}.sh`
+export interface CaptureLayout {
+  /** Guest path of the staged wrapper script. */
+  script: string
+  /** Guest path the wrapper redirects fd 1 to. */
+  stdout: string
+  /** Guest path the wrapper redirects fd 2 to. */
+  stderr: string
+  /** First line of both capture files, written before the caller's script runs. */
+  marker: string
+}
+
+/**
+ * The guest-side paths and capture marker for one `exec`, all derived from one
+ * random id so a reader can see at a glance that they belong to each other.
+ *
+ * Random rather than counter-derived: two processes (the server and the CLI)
+ * can run against the same guest, and two counters both starting at 1 would
+ * collide on the same path — a silent clobber that looks like a flaky grader.
+ *
+ * Exported for the tests, which have to fake a guest-to-host copy and so need
+ * the same marker this module will go looking for. One shared derivation beats
+ * writing the naming scheme down in two places that can drift apart.
+ */
+export function captureLayout(id: string): CaptureLayout {
+  return {
+    script: `/tmp/rhcsa-${id}.sh`,
+    stdout: `/tmp/rhcsa-${id}.out`,
+    stderr: `/tmp/rhcsa-${id}.err`,
+    marker: `--rhcsa-${id}--`,
+  }
+}
+
+/**
+ * Wraps the caller's script so the guest captures its own output to files.
+ *
+ * `vmrun runProgramInGuest` does not return the guest program's stdout, and no
+ * flag makes it: the guest program inherits `vmtoolsd`'s stdout, so its output
+ * lands in the guest's journal and never crosses back to the host. Measured —
+ * `scripts/provision.sh`'s readiness probe used to grep for a string the guest
+ * printed and failed 92 consecutive times against a completely healthy guest,
+ * while that guest's journal recorded all 92 runs succeeding. So the guest has
+ * to write its output somewhere the host can fetch it afterwards, and this
+ * wrapper is that arrangement.
+ *
+ * `exec` with only redirections and no command replaces this shell's own file
+ * descriptors for the rest of the file. That is deliberately not a `{ ... }`
+ * group around the caller's script: a group has to be closed, which breaks on
+ * a script ending inside a heredoc, and an empty group is a bash syntax error.
+ * `exec` prepends lines and changes nothing else, so the caller's text is
+ * appended verbatim and the script's exit status stays its own — measured, a
+ * wrapped `exit 3` still exits 3.
+ *
+ * The marker goes to both streams before the caller's script runs, which buys
+ * two things. Neither capture file is ever 0 bytes, so nothing here depends on
+ * how vmrun copies an empty file out of a guest — unverified behaviour that
+ * the commonest case of all, a command that prints nothing, would otherwise
+ * hit on every single exec. And the marker's presence is a positive integrity
+ * check: a captured file not starting with it was truncated, never written, or
+ * belongs to some other exec, and that gets reported rather than quietly
+ * returned as "the command produced no output".
+ */
+function wrapScript(script: string, g: CaptureLayout): string {
+  return [
+    '# Staged by VmrunTransport. Deleted after the run; do not edit.',
+    `exec >'${g.stdout}' 2>'${g.stderr}'`,
+    `printf '%s\\n' '${g.marker}'`,
+    `printf '%s\\n' '${g.marker}' >&2`,
+    '',
+    script.endsWith('\n') ? script : `${script}\n`,
+  ].join('\n')
+}
+
+/**
+ * Reads one captured stream back, or `null` when the capture cannot be
+ * trusted. `null` is not "empty output" — see `wrapScript` for why the two are
+ * distinguishable at all, and `exec` for what it does with the difference.
+ */
+async function readCapture(hostPath: string, marker: string): Promise<string | null> {
+  let raw: string
+  try {
+    raw = await readFile(hostPath, 'utf8')
+  } catch {
+    return null
+  }
+  const prefix = `${marker}\n`
+  return raw.startsWith(prefix) ? raw.slice(prefix.length) : null
 }
 
 /**
  * Runs scripts through `vmrun runProgramInGuest`.
  *
- * Slower than SSH — three vmrun round trips per exec — but it needs no guest
+ * Slower than SSH — five vmrun round trips per exec — but it needs no guest
  * networking, which is what makes fault-injection tasks gradeable.
  */
 export class VmrunTransport implements LabTransport {
@@ -150,44 +230,122 @@ export class VmrunTransport implements LabTransport {
   }
 
   async exec(script: string): Promise<ExecResult> {
+    const g = captureLayout(randomBytes(6).toString('hex'))
     const dir = await mkdtemp(join(tmpdir(), 'rhcsa-stage-'))
-    const hostPath = join(dir, 'script.sh')
-    const guestPath = guestScriptPath()
-    await writeFile(hostPath, script, 'utf8')
+    const stagedHost = join(dir, 'script.sh')
+    const outHost = join(dir, 'stdout')
+    const errHost = join(dir, 'stderr')
+    await writeFile(stagedHost, wrapScript(script, g), 'utf8')
 
     try {
-      await this.#run(
+      const copyIn = await this.#run(
         this.#cfg.vmrun,
         this.#guestArgv(
           'copyFileFromHostToGuest',
           // vmrun.exe is a Windows program, so the *host* side of this copy has
-          // to be a path Windows can open — `hostPath` as written by mkdtemp
+          // to be a path Windows can open — `stagedHost` as written by mkdtemp
           // cannot be (see toWindowsPath). The guest side stays POSIX: that one
           // is interpreted by the guest, not by Windows.
-          await toWindowsPath(hostPath),
-          guestPath,
+          await toWindowsPath(stagedHost),
+          g.script,
         ),
       )
+      // Checked, where it used to be ignored. With the script never staged, the
+      // run below is just bash exiting 127 about a missing file, which sends
+      // the reader hunting in the guest for a copy that never left the host.
+      if (copyIn.code !== 0) {
+        return {
+          stdout: '',
+          stderr:
+            copyIn.stderr.trim().length > 0
+              ? copyIn.stderr
+              : `vmrun could not stage ${g.script} in the guest (exit ${copyIn.code})`,
+          code: copyIn.code,
+        }
+      }
 
-      const result = await this.#run(
+      const run = await this.#run(
         this.#cfg.vmrun,
         // No -noWait / -activeWindow / -interactive: those are bare presence
         // flags, not `=false` assignments, and blocking until the guest program
         // exits is already vmrun's default. Passing them as `flag=false` is a
         // syntax error, not a no-op.
-        this.#guestArgv('runProgramInGuest', '/usr/bin/bash', guestPath),
+        this.#guestArgv('runProgramInGuest', '/usr/bin/bash', g.script),
       )
 
-      const reported = GUEST_CODE_RE.exec(`${result.stdout}\n${result.stderr}`)
-      const code = reported ? Number(reported[1]) : result.code
+      // Two more round trips, and the reason this transport costs five rather
+      // than three: the guest's output only exists as files in the guest, so it
+      // has to be fetched. The host destinations are inside the mkdtemp
+      // directory, which is also where the copy *in* above reads from — a form
+      // vmrun demonstrably handles, since that is the path provision.sh's own
+      // guest copy uses. The one thing not yet exercised against real vmrun is
+      // the write direction to that path; if it turns out vmrun cannot write
+      // there, the marker check below reports it in stderr rather than handing
+      // a grader a silent empty string.
+      const copyOut = await this.#run(
+        this.#cfg.vmrun,
+        this.#guestArgv('copyFileFromGuestToHost', g.stdout, await toWindowsPath(outHost)),
+      )
+      const copyErr = await this.#run(
+        this.#cfg.vmrun,
+        this.#guestArgv('copyFileFromGuestToHost', g.stderr, await toWindowsPath(errHost)),
+      )
 
-      return { stdout: result.stdout, stderr: result.stderr, code }
+      const captured = {
+        stdout: await readCapture(outHost, g.marker),
+        stderr: await readCapture(errHost, g.marker),
+      }
+
+      const reported = GUEST_CODE_RE.exec(`${run.stdout}\n${run.stderr}`)
+      const code = reported ? Number(reported[1]) : run.code
+
+      // `run.stdout` is deliberately absent from every result below. It is
+      // vmrun's own prose about the guest program ("Guest program exited with
+      // non-zero code: 3"), not the guest program's output, and returning it as
+      // the latter is the entire bug this function exists to not have: a grader
+      // reading command output over this transport got vmrun's chatter, or more
+      // often the empty string, and graded against it. GUEST_CODE_RE above and
+      // the diagnostic below are the only legitimate uses for that prose.
+      const missing = (['stdout', 'stderr'] as const).filter((s) => captured[s] === null)
+      if (missing.length === 0) {
+        return {
+          stdout: captured.stdout ?? '',
+          stderr: captured.stderr ?? '',
+          code,
+        }
+      }
+
+      // Every string here has been through makeRunner, which redacts `-gp`, so
+      // the guest password cannot ride along into a grader's output.
+      const why = [copyOut.stderr, copyErr.stderr, run.stderr]
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .join(' | ')
+      return {
+        stdout: captured.stdout ?? '',
+        // The failure is reported on stderr, never on stdout: a grader parses
+        // stdout, and a diagnostic mixed into it would be indistinguishable
+        // from the guest having printed it.
+        stderr: [
+          `vmrun transport: guest ${missing.join(' and ')} could not be captured.`,
+          why.length > 0 ? `vmrun reported: ${why}` : 'vmrun reported nothing.',
+          captured.stderr ?? '',
+        ]
+          .filter((s) => s.length > 0)
+          .join('\n'),
+        code,
+      }
     } finally {
-      // Best effort: a leftover /tmp script is harmless, a thrown cleanup
+      // One rm for all three paths rather than three deleteFileInGuest calls,
+      // which keeps cleanup to a single round trip. Arguments after the program
+      // reach the program rather than vmrun — provision.sh's step 5 passes
+      // `/usr/bin/bash -c '<script>'` this way against real vmrun 1.17.0.
+      //
+      // Best effort: leftover /tmp files are harmless, and a thrown cleanup
       // error would mask the real result.
       await this.#run(
         this.#cfg.vmrun,
-        this.#guestArgv('deleteFileInGuest', guestPath),
+        this.#guestArgv('runProgramInGuest', '/usr/bin/rm', '-f', g.script, g.stdout, g.stderr),
       ).catch(() => undefined)
       await rm(dir, { recursive: true, force: true }).catch(() => undefined)
     }
