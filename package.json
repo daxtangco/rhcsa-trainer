@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "rhcsa": "node --env-file-if-exists=.env.local src/cli/index.ts",
     "validate": "node --env-file-if-exists=.env.local src/cli/index.ts validate",
+    "corpus": "node scripts/extract-corpus.ts",
     "coverage": "node src/cli/index.ts coverage",
     "lint:content": "node src/cli/index.ts lint",
     "dev:server": "node --env-file-if-exists=.env.local src/server/index.ts",

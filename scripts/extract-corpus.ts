@@ -36,12 +36,24 @@ const MAX_BODY_LINES = 120
 // Measured baseline (2026-08-30, against the source PDFs via pdftotext -layout):
 // r9 = 30 labs / 95 exercises, r10 = 28 labs / 85 exercises,
 // 28 shared labs + 84 shared exercises = 112 cross-edition items.
+// Reproduced exactly on 2026-09-14 on a different poppler build, which is what
+// makes these figures a property of the books and the slicing rules rather than of
+// one machine: that run changed three of 360 entries and no count at all.
 // (A naive `grep | sort -u` count over the raw text inflates this: pdftotext
 // -layout leaves a page-break form feed on some heading lines and not others,
 // so the same logical id can appear as two distinct byte strings unless the
 // canonicalized capture-group id, as findItems builds it, is used to dedupe.)
 // A future change to the heading/terminator regexes should land near these
 // figures; a swing of ten or more means the slicing logic broke.
+
+/** The first step of a numbered procedure: ` 1. Restart your server…`. */
+const FIRST_STEP_RE = /^\s*1\.\s/
+/**
+ * How far into a body to look for that first step. Measured, not guessed: the
+ * deepest real one in either book is `r10 Exercise 14-3`, whose step 1 sits on
+ * body line 12 behind eleven lines of "you will need a spare disk" preamble.
+ */
+const STEP_SCAN_LINES = 14
 
 function heading(line: string): { kind: 'lab' | 'exercise'; id: string; chapter: number } | undefined {
   const lab = LAB_RE.exec(line)
@@ -56,12 +68,64 @@ function heading(line: string): { kind: 'lab' | 'exercise'; id: string; chapter:
 }
 
 /**
- * Slice labs and exercises out of `pdftotext -layout` output.
+ * Does this slice open a numbered procedure? Only asked of exercises.
  *
- * Every id appears at least twice — once in the table of contents, once at the
- * real heading — so the longest body wins. A contents entry is one line and
- * always loses.
+ * Labs are exempt because for them the rule can only lose. All 58 lab slices in
+ * the shipped corpus are already sliced correctly, so there is nothing for it to
+ * win — and 5 of them (`Lab 1.1` in both editions among them) are written as
+ * prose or bullets with no numbered step at all, while the Appendix A answer key
+ * that competes with each lab for the same id is a numbered list. Applying it
+ * there would demote the assignment in favour of its own solution.
  */
+function opensAProcedure(item: CorpusItem): boolean {
+  if (item.kind !== 'exercise') return false
+  // From line 1: the heading line itself is never a step, and skipping it keeps
+  // the window the same 14 lines that were measured against the corpus.
+  return item.text
+    .split('\n')
+    .slice(1, STEP_SCAN_LINES + 1)
+    .some((line) => FIRST_STEP_RE.test(line))
+}
+
+/**
+ * Rank two slices of the same id against each other: does `candidate` beat
+ * `incumbent`?
+ *
+ * Longest body is the base rule, because every id appears at least twice — once
+ * in the table of contents, once at the real heading — and a contents entry is
+ * one line.
+ *
+ * Longest body **alone** is not enough. `pdftotext -layout` hard-wraps prose, so
+ * a paragraph reading *"(see\nExercise 18-2 for the exact procedure for how to do
+ * that.)"* leaves a line that begins exactly like a heading, and the slice taken
+ * from it then runs to the end of the chapter — comfortably longer than the real
+ * exercise. That is how `r10 Exercise 18-2` came to be stored as a sentence
+ * fragment plus three unrelated sections.
+ *
+ * The discriminator is the one the books themselves use: an *Exercise* is a
+ * numbered walkthrough, so its real body has a `1.` step near the top and a
+ * cross-reference sentence does not. Measured against the shipped corpus
+ * (2026-09-13): 179 of the 180 exercise slices carry that step within
+ * `STEP_SCAN_LINES`, and the single one that does not is this defect.
+ *
+ * Two things this deliberately is **not**:
+ *
+ * - **Not a filter.** A slice with no step is demoted, never dropped, so an id
+ *   whose only slice is a contents entry still produces an item. Nothing here can
+ *   move the 238-instance / 126-slot counts by losing an id.
+ * - **Not a test on the title.** The two obvious title filters both destroy real
+ *   content: rejecting a lowercase initial would drop `Exercise 2-5`, *"vim
+ *   Practice"*, from both editions, and rejecting punctuation would drop
+ *   `Exercise 13-4`, *"Changing rsyslog.conf Rules"*. This rule reads the body
+ *   instead, and neither of those exercises is affected by it.
+ */
+function beats(candidate: CorpusItem, incumbent: CorpusItem): boolean {
+  const c = opensAProcedure(candidate)
+  if (c !== opensAProcedure(incumbent)) return c
+  return candidate.text.length > incumbent.text.length
+}
+
+/** Slice labs and exercises out of `pdftotext -layout` output. */
 export function findItems(fullText: string, edition: string): CorpusItem[] {
   const lines = fullText.split('\n')
 
@@ -102,7 +166,7 @@ export function findItems(fullText: string, edition: string): CorpusItem[] {
     }
 
     const existing = best.get(start.id)
-    if (!existing || item.text.length > existing.text.length) best.set(start.id, item)
+    if (!existing || beats(item, existing)) best.set(start.id, item)
   }
 
   return [...best.values()].sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }))
@@ -126,7 +190,21 @@ export function weightSignal(items: CorpusItem[]): Record<string, string[]> {
 }
 
 async function extract(pdf: string): Promise<string> {
-  // pdftotext is the rootless poppler wrapper in ~/.local/bin.
+  // pdftotext is the rootless poppler wrapper in ~/.local/bin, and it is not
+  // installed - it is unpacked, because this host's sudo needs an interactive
+  // password. Rebuild it (it went missing once already, with a WSL distro rebuild
+  // that did not carry ~/.local) with:
+  //
+  //   dnf download --resolve poppler-utils     # unprivileged; pulls 30 RPMs with deps
+  //   for r in *.rpm; do rpm2archive "$r"; done  # rpm2archive: this host has no cpio
+  //   cd ~/.local/poppler && for t in .../*.rpm.tgz; do tar xzf "$t"; done
+  //
+  // then a wrapper on PATH exporting LD_LIBRARY_PATH=~/.local/poppler/usr/lib64.
+  // Use the poppler RHEL 9 ships (21.01.0) and not a newer one: `-layout` column
+  // spacing differs between versions, which changes the artifact without changing
+  // any count. That is exactly what the 2026-09-14 regeneration saw - two entries
+  // differed only in intra-line whitespace, where 21.01.0 preserves column gaps a
+  // newer poppler had collapsed.
   const { stdout } = await run('pdftotext', ['-layout', pdf, '-'], {
     maxBuffer: 256 * 1024 * 1024,
   })

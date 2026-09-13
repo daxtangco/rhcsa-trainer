@@ -69,6 +69,127 @@ describe('findItems', () => {
     expect(winner?.text).not.toBe('Exercise 15-1 Creating a volume group')
   })
 
+  it('loses to a prose cross-reference under longest-body alone, and wins with the step rule', () => {
+    // The `r10 Exercise 18-2` defect, reduced to its shape. `pdftotext -layout`
+    // hard-wraps prose, so "(see Exercise 18-2 for …)" leaves a line that begins
+    // exactly like a heading; the slice taken from it then runs to the end of the
+    // chapter and is far longer than the real four-step exercise.
+    //
+    // The prose slice is deliberately placed *after* the real heading and made
+    // deliberately longer, so neither first-match-wins nor longest-body-wins
+    // produces the right answer here — only reading the body for a numbered step
+    // does.
+    const crossReference = [
+      'Exercise 18-2 Using the Rescue Option',
+      '',
+      ' 1. Restart your server from the installation disk.',
+      ' 2. Select the Troubleshooting menu option.',
+      ' 3. Select Rescue a Red Hat Enterprise Linux System.',
+      ' 4. Press 1 to accept the Continue option.',
+      '',
+      'Reinstalling GRUB 2',
+      'If GRUB 2 is broken you have to reinstall it from a rescue disk (see',
+      'Exercise 18-2 for the exact procedure for how to do that.) After mounting',
+      'your file systems on /mnt/sysroot and using chroot to make the mounted',
+      'image your root image, reinstalling is as easy as running grub2-install.',
+      '',
+      'Fixing the Initramfs',
+      'In rare cases the initramfs might get damaged. To re-create it using all',
+      'default settings you can just run the dracut --force command.',
+    ].join('\n')
+
+    const items = findItems(crossReference, 'r10')
+    const ex = items.find((i) => i.id === 'Exercise 18-2')
+
+    // The heading is a title, not a sentence fragment.
+    expect(ex?.text.split('\n')[0]).toBe('Exercise 18-2 Using the Rescue Option')
+    expect(ex?.text).toMatch(/Restart your server/)
+    // And the losing slice's contents are gone with it: three unrelated sections
+    // of chapter 18 used to be stored as the body of this exercise.
+    expect(ex?.text).not.toMatch(/dracut --force/)
+    expect(ex?.text).not.toMatch(/for the exact procedure/)
+  })
+
+  it('keeps the two titles a lowercase-initial or punctuation filter would have destroyed', () => {
+    // Why the rule reads the body and not the title. Both of these are real
+    // exercises in the shipped corpus, and both are what the two obvious title
+    // filters would have thrown away — `vim Practice` for its lowercase initial,
+    // `rsyslog.conf` for its dot. Each also has a longer prose cross-reference
+    // competing with it, so the step rule is what has to save them.
+    const awkwardTitles = [
+      'Exercise 2-5 vim Practice',
+      ' 1. Type vim ~/testfile to open testfile in vim.',
+      ' 2. Press i to enter input mode and type some text.',
+      '',
+      'Exercise 13-4 Changing rsyslog.conf Rules',
+      ' 1. Open a root shell and type vim /etc/rsyslog.conf.',
+      ' 2. Add a line reading *.info /var/log/messages.info.',
+      '',
+      'Editing Text Files',
+      'Every administrator needs an editor, and on RHEL that editor is vim (see',
+      'Exercise 2-5 if you have never used it, and note that the modal design',
+      'takes some getting used to before it starts to feel fast rather than',
+      'obstructive; there is no shortcut past that part of learning it).',
+      '',
+      'Working with rsyslogd',
+      'Logging is configured through a set of rules, and changing them is covered in',
+      'Exercise 13-4 in some detail, along with the facility and priority names that',
+      'those rules are written in terms of and the destinations they can send to.',
+    ].join('\n')
+
+    const items = findItems(awkwardTitles, 'r9')
+    expect(items.map((i) => i.text.split('\n')[0])).toEqual([
+      'Exercise 2-5 vim Practice',
+      'Exercise 13-4 Changing rsyslog.conf Rules',
+    ])
+  })
+
+  it('falls back to longest body when no slice of an id opens a numbered procedure', () => {
+    // The rule demotes, it never filters — otherwise an id whose every slice is a
+    // contents entry would vanish and the corpus counts would move. Here neither
+    // slice has a step, so the base rule decides and the item still exists.
+    const noSteps = [
+      'Exercise 21-1 Managing Containers',
+      '',
+      'Exercise 21-1 Managing Containers',
+      'Set up a rootless container that starts automatically on boot, using the',
+      'registry configured earlier in this chapter.',
+    ].join('\n')
+
+    const items = findItems(noSteps, 'r9')
+    expect(items).toHaveLength(1)
+    expect(items[0]?.text).toMatch(/rootless container/)
+  })
+
+  it('does not require a numbered step of a lab, whose answer key is the numbered one', () => {
+    // Why the step rule stops at exercises. `Lab 1.1` is written as prose and
+    // bullets in both editions — 5 of the 58 lab slices carry no numbered step —
+    // and the slice competing with it for the id is the Appendix A answer key,
+    // which is a numbered list. Applied to labs, the rule would hand every such
+    // lab its own solution and call that the assignment.
+    const labAndAnswer = [
+      'Lab 1.1',
+      '',
+      'Repeat the procedure “Performing an Installation” to install one more server.',
+      'For now, it is sufficient to ensure that the following conditions are met:',
+      '    Use the server name server2.example.com.',
+      '    Set the network configuration to obtain an IP address automatically.',
+      '    Use an 8 GiB disk with default partitioning.',
+      '',
+      '\fChapter 1',
+      '',
+      'Answers to Lab 1.1',
+      'Lab 1.1',
+      '  1. Install with the server name server2.example.com.',
+      '  2. Accept the automatic network configuration.',
+    ].join('\n')
+
+    const items = findItems(labAndAnswer, 'r9')
+    expect(items).toHaveLength(1)
+    expect(items[0]?.text).toMatch(/Performing an Installation/)
+    expect(items[0]?.text).not.toMatch(/Accept the automatic network/)
+  })
+
   it('terminates a body at RHCSA 9\'s bare form-feed chapter opening, not just at the dotted form', () => {
     // Mandate 2: RHCSA 9's real body chapters open as a form feed, a bare
     // "Chapter N" alone on the line, a blank line, then the title — which the
