@@ -1,6 +1,6 @@
 import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { run } from '../../src/cli/index.ts'
@@ -63,6 +63,56 @@ function countProblems(err: string, pattern: RegExp): number {
   return err.split('\n').filter((l) => l.startsWith('problem:') && pattern.test(l)).length
 }
 
+/**
+ * What a content root *contains*, counted here by a walk this file owns.
+ *
+ * The two numbers `rhcsa lint` prints used to be asserted as the literals `5` and
+ * `21`, which is how they were measured on the bank of the day. That is a trap
+ * rather than a check: every task added to `content/` turns four green tests red
+ * with a number, tells the next author nothing about what broke, and invites them
+ * to bump the literal — which re-arms it. Worse, `/graders checked: 5/` is
+ * unanchored, so it would also have matched `graders checked: 50`.
+ *
+ * So the expectation is derived, and deliberately derived from a **second walk**
+ * rather than from `lintContent`'s own return value. Comparing the lint's count to
+ * the lint's count is vacuous; comparing it to an independent count of the files on
+ * disk is the property actually worth pinning — *the number it reports is the
+ * number of graders there are*, whatever the bank grows to.
+ *
+ * `headerScripts` is `grade.sh` count plus `antisolutions/*.sh` count because those
+ * are exactly the two `inventory.push` sites in `lintContent`: one per grader
+ * (unconditionally, since `# baseline-fail:` is required of every grader) and one
+ * per anti-solution fixture. Solutions and `setup.sh` carry no header and are not
+ * inventoried. If that ever changes, this identity fails loudly here — which is the
+ * point — rather than a stale literal failing for the wrong reason.
+ */
+async function walkInventory(root: string): Promise<{ graders: number; headerScripts: number }> {
+  const entries = await readdir(join(root, 'tasks'), { recursive: true, withFileTypes: true })
+  let graders = 0
+  let antisolutions = 0
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith('.sh')) continue
+    if (e.name === 'grade.sh') graders += 1
+    else if (basename(e.parentPath) === 'antisolutions') antisolutions += 1
+  }
+  // Anti-vacuity, the same rule the golden fixture test states: a walk that found
+  // nothing must not be able to agree with a lint that checked nothing.
+  expect(graders, `no grade.sh under ${root}/tasks, so nothing below proves anything`).toBeGreaterThan(0)
+  expect(antisolutions).toBeGreaterThan(0)
+  return { graders, headerScripts: graders + antisolutions }
+}
+
+/** Both counts the lint prints, anchored to whole lines so `5` cannot match `50`. */
+async function expectInventoryReported(out: string, root: string): Promise<void> {
+  const live = await walkInventory(root)
+  expect(out, `expected "graders checked: ${live.graders}"`).toMatch(
+    new RegExp(`^graders checked: ${live.graders}$`, 'm'),
+  )
+  expect(out, `expected "scripts with headers: ${live.headerScripts}"`).toMatch(
+    new RegExp(`^scripts with headers: ${live.headerScripts}$`, 'm'),
+  )
+}
+
 describe('rhcsa lint on the shipped bank', () => {
   it('exits 0 and needs no VM, no .env.local and no network', async () => {
     // Every other content gate in this project goes through `rhcsa validate`,
@@ -71,8 +121,8 @@ describe('rhcsa lint on the shipped bank', () => {
     const r = await lint(CONTENT)
     expect(r.err).toBe('')
     expect(r.code).toBe(0)
-    expect(r.out).toMatch(/graders checked: 5/)
-    expect(r.out).toMatch(/scripts with headers: 21/)
+    // Derived from a walk of `content/`, not a literal: see `walkInventory`.
+    await expectInventoryReported(r.out, CONTENT)
   })
 
   it('prints the inventory it checked, not just a verdict', async () => {
@@ -405,7 +455,9 @@ describe('rhcsa lint fails when there is nothing to check', () => {
     // The message has to say what to do, because the operator seeing it is
     // most likely looking at a path problem, not a content problem.
     expect(r.err).toMatch(/--allow-empty/)
-    expect(r.out).toMatch(/graders checked: 0/)
+    // Anchored to the whole line: unanchored, `0` also matches `graders checked: 011`
+    // and, more to the point, `5` used to match `50`.
+    expect(r.out).toMatch(/^graders checked: 0$/m)
   })
 
   it('exits 0 there when --allow-empty says the empty bank is expected', async () => {
@@ -457,8 +509,11 @@ describe('rhcsa lint enforces the fixture floors it derives from the bank', () =
   it('passes the shipped bank, so these rules are a floor under today\'s content', async () => {
     // Stated as its own test rather than left implicit in the exit-0 test above:
     // a floor that fires on committed content is a change to the content, and
-    // this is not one. Five tasks, anti-solution counts 5/3/3/3/2, no non-.sh
-    // file anywhere under a fixture directory.
+    // this is not one. Every task clears both floors and no non-.sh file sits
+    // anywhere under a fixture directory. (The bank was five tasks with
+    // anti-solution counts 5/3/3/3/2 when this was written; it is deliberately not
+    // restated as a number here, because the assertion is "no problems", not "this
+    // many files".)
     const r = await lint(CONTENT)
     expect(r.err).toBe('')
     expect(r.code).toBe(0)
@@ -466,8 +521,8 @@ describe('rhcsa lint enforces the fixture floors it derives from the bank', () =
 
   it('catches a missing antisolutions/ directory, which a walk cannot notice', async () => {
     // The original third silent-green channel, measured at exit 0 before this
-    // rule existed: 18 inventory rows instead of 21, every header that remained
-    // agreeing with itself, no problems.
+    // rule existed: three inventory rows fewer than the bank of the day had (18 of
+    // 21), every header that remained agreeing with itself, no problems.
     const root = await bankCopy()
     await rm(join(root, STORAGE, 'antisolutions'), { recursive: true })
 
@@ -539,10 +594,11 @@ describe('rhcsa lint enforces the fixture floors it derives from the bank', () =
 
   it('catches a solution renamed off .sh even where the floor still clears', async () => {
     // The same rule on the sibling directory, which the brief's four did not
-    // name. Measured: 006 is the one task with three solutions, so renaming one
-    // leaves exactly MIN_SOLUTIONS and the floor stays quiet — the asymmetry was
-    // a live hole rather than a tidiness point. Four of the five tasks ship
-    // exactly two solutions, where the floor would have caught it.
+    // name. Measured: 006 ships three solutions, so renaming one leaves exactly
+    // MIN_SOLUTIONS and the floor stays quiet — the asymmetry was a live hole rather
+    // than a tidiness point. Most tasks ship exactly two solutions, where the floor
+    // would have caught it; 006 is picked here precisely because it has the spare
+    // one, and that is the case the floor cannot see.
     const root = await bankCopy()
     const dir = join(root, USERS, 'solutions')
     await rename(join(dir, '03-primary-group-only.sh'), join(dir, '03-primary-group-only.sh.disabled'))
@@ -625,7 +681,11 @@ describe('rhcsa lint enforces the fixture floors it derives from the bank', () =
     const r = await lint(root)
     expect(r.code).toBe(1)
     expect(r.err).toMatch(/no task in the bank owns this grader/)
-    expect(r.out).toMatch(/graders checked: 5/)
+    // Every grader in the copy is still on disk and still checked — removing a
+    // task.yaml costs the bank a task, not the walk a script. Counted against
+    // `root`, the copy actually linted, so the assertion holds whatever the plant
+    // above did to the tree.
+    await expectInventoryReported(r.out, root)
   })
 
   it('says so loudly when the bank will not load, and still lints the headers', async () => {
@@ -639,8 +699,10 @@ describe('rhcsa lint enforces the fixture floors it derives from the bank', () =
     const r = await lint(root)
     expect(r.code).toBe(1)
     expect(r.err).toMatch(/the bank did not load, so the per-task fixture floors were not checked/)
-    expect(r.out).toMatch(/graders checked: 5/)
-    expect(r.out).toMatch(/scripts with headers: 21/)
+    // The whole script half still ran: both counts are the copy's full inventory,
+    // not a truncated one, which is the "a YAML error must not take the script lint
+    // down with it" claim stated as a number.
+    await expectInventoryReported(r.out, root)
   })
 })
 
@@ -658,8 +720,24 @@ describe('rhcsa lint runs the bank-derived rules whatever the walk found', () =>
   // checked *by* the rules and is not allowed to gate them, and these tests pin the
   // placement rather than the logic — the logic was never wrong.
 
-  /** Five tasks still declared in the bank; every grade.sh and every antisolutions/ gone. */
-  async function strippedBank(): Promise<string> {
+  /**
+   * Every task still declared in the bank; every grade.sh and every antisolutions/
+   * gone.
+   *
+   * Returns the number of tasks stripped, because the rules under test fire **once
+   * per bank task** and the count each one has to equal is therefore a property of
+   * the bank rather than a number anybody should be typing. It used to be the
+   * literal `5`, which meant adding a task to `content/` turned these four tests red
+   * with an arithmetic complaint about a plant that had worked perfectly.
+   *
+   * `graders` is the right derivation for both rules: each task directory in the
+   * shipped bank owns exactly one `grade.sh` and exactly one `antisolutions/`, and
+   * that is not assumed here — `antisolutionDirs` is counted separately and required
+   * to agree, and the shipped-bank test at the top of this file (0 problems, so no
+   * `has no grade.sh` and no `antisolutions/ is missing`) is what keeps the
+   * task-to-grader mapping one-to-one.
+   */
+  async function strippedBank(): Promise<{ root: string; tasks: number }> {
     const root = await bankCopy()
     const entries = await readdir(join(root, 'tasks'), { recursive: true, withFileTypes: true })
 
@@ -670,37 +748,44 @@ describe('rhcsa lint runs the bank-derived rules whatever the walk found', () =>
         graders += 1
       }
     }
+    let antisolutionDirs = 0
     for (const e of entries) {
       if (e.isDirectory() && e.name === 'antisolutions') {
         await rm(join(e.parentPath, e.name), { recursive: true })
+        antisolutionDirs += 1
       }
     }
-    // The plant has to have landed on all five, or the counts below prove nothing.
-    expect(graders).toBe(5)
-    return root
+    // The plant has to have landed on every task, or the counts below prove nothing:
+    // a stripped bank that stripped nothing would report zero problems and read as
+    // agreement.
+    expect(graders, 'no grade.sh was stripped, so the tests below prove nothing').toBeGreaterThan(0)
+    expect(antisolutionDirs, 'one grade.sh per antisolutions/ is what the counts below assume').toBe(graders)
+    return { root, tasks: graders }
   }
 
-  it('fires the grade.sh rule five times at zero graders, under --allow-empty', async () => {
-    const root = await strippedBank()
+  it('fires the grade.sh rule once per bank task at zero graders, under --allow-empty', async () => {
+    const { root, tasks } = await strippedBank()
     const r = await lint(root, '--allow-empty')
 
     expect(r.code).toBe(1)
-    expect(countProblems(r.err, /is in the bank but has no grade\.sh/)).toBe(5)
-    expect(countProblems(r.err, /antisolutions\/ is missing/)).toBe(5)
+    // One problem per task the bank still declares — every task, not "some": the
+    // rule is unreachable-if-guarded, so a partial count is the defect coming back.
+    expect(countProblems(r.err, /is in the bank but has no grade\.sh/)).toBe(tasks)
+    expect(countProblems(r.err, /antisolutions\/ is missing/)).toBe(tasks)
     // The walk really did find nothing, which is what made this reachable: the
     // rules fired from `bank.tasks` alone.
-    expect(r.out).toMatch(/graders checked: 0/)
+    expect(r.out).toMatch(/^graders checked: 0$/m)
   })
 
   it('fires them at zero graders without the flag too, so the flag is not the axis', async () => {
     // Both axes, because `--allow-empty` was only the thing that made the exit code
     // 0. The unreachability was there without it, and a fix that worked only under
     // the flag would leave the placement bug intact.
-    const root = await strippedBank()
+    const { root, tasks } = await strippedBank()
     const r = await lint(root)
 
     expect(r.code).toBe(1)
-    expect(countProblems(r.err, /is in the bank but has no grade\.sh/)).toBe(5)
+    expect(countProblems(r.err, /is in the bank but has no grade\.sh/)).toBe(tasks)
     expect(r.err).toMatch(/no grade\.sh found, so nothing was checked/)
   })
 
@@ -708,7 +793,7 @@ describe('rhcsa lint runs the bank-derived rules whatever the walk found', () =>
     // setup.sh inherits the placement fix, and both axes are pinned because the flag
     // is now a live axis for every bank-derived rule rather than for the one guard
     // it was written against.
-    const root = await strippedBank()
+    const { root } = await strippedBank()
     await rm(join(root, 'tasks/storage/014-grow-home-lv/setup.sh'))
 
     for (const args of [[], ['--allow-empty']]) {
@@ -722,7 +807,7 @@ describe('rhcsa lint runs the bank-derived rules whatever the walk found', () =>
     // What the flag was added for, and it has to keep working: deliberately linting
     // a root before any task is authored. There is no bank to load and no task to
     // iterate, so no rule has anything to say — which is a different fact from the
-    // case above, where five tasks were declared.
+    // case above, where every task in the bank was still declared.
     const dir = await mkdtemp(join(tmpdir(), 'rhcsa-lint-nobank-'))
     temps.push(dir)
     await mkdir(join(dir, 'tasks'), { recursive: true })
@@ -740,7 +825,7 @@ describe('rhcsa lint runs the bank-derived rules whatever the walk found', () =>
     // Measured before this fix, on a root still declaring all five tasks: exit 0, 0
     // problems, stderr 0 bytes. One ordinary YAML typo re-opened the exact channel the
     // unconditional floors above were written to close.
-    const root = await strippedBank()
+    const { root } = await strippedBank()
     await writeFile(
       join(root, 'tasks/storage/014-grow-home-lv/task.yaml'),
       'id: [broken\n  title: nope\n',
@@ -755,7 +840,7 @@ describe('rhcsa lint runs the bank-derived rules whatever the walk found', () =>
     expect(r.err).toMatch(/task\.yaml: missed comma between flow collection entries/)
     // The walk really did find nothing, so the message came from the named-path check
     // and not from a grader being present.
-    expect(r.out).toMatch(/graders checked: 0/)
+    expect(r.out).toMatch(/^graders checked: 0$/m)
   })
 
   it('does not let --allow-empty excuse a bank that will not load when graders exist', async () => {
@@ -772,6 +857,120 @@ describe('rhcsa lint runs the bank-derived rules whatever the walk found', () =>
     const r = await lint(root, '--allow-empty')
     expect(r.code).toBe(1)
     expect(r.err).toMatch(/the bank did not load, so the per-task fixture floors were not checked/)
+  })
+})
+
+describe('rhcsa lint catches a script that reads its own remaining text from stdin', () => {
+  const ANTI = 'tasks/net/046-key-based-ssh-login/antisolutions/04-moved-from-root-home-then-setenforce.sh'
+
+  /** Plant an arbitrary fixture body, so a shape can be tested without a real defect nearby. */
+  async function fixture(body: string): Promise<string> {
+    const root = await bankCopy()
+    const file = join(root, ANTI)
+    const before = await readFile(file, 'utf8')
+    // Keep the `# expect-fail:` header and the shebang; replace only the commands, so
+    // the other rules in this file stay satisfied and the exit code is about this one.
+    const head = before.slice(0, before.indexOf('set -euo pipefail'))
+    await writeFile(file, `${head}set -euo pipefail\n${body}\n`, 'utf8')
+    return root
+  }
+
+  it('catches the ausearch defect that cost a real validation run', async () => {
+    // Not a synthetic shape: this is the line as it shipped on 2026-09-14, in the file
+    // it shipped in. `sudo ausearch -m avc -ts recent` consumed the ten lines below it
+    // — including the `sudo setenforce 0` the fixture existed to perform — and bash
+    // exited 0 at end-of-input, so the harness saw a fixture that succeeded and the
+    // grader was blamed for reporting SELinux correctly still Enforcing.
+    const root = await bankCopy()
+    const file = join(root, ANTI)
+    const before = await readFile(file, 'utf8')
+    const after = before.replace('ausearch -m avc -ts recent < /dev/null', 'ausearch -m avc -ts recent')
+    expect(after, 'the plant did not change the fixture, so this test proves nothing').not.toBe(before)
+    await writeFile(file, after, 'utf8')
+
+    const { code, err } = await lint(root)
+    expect(code).toBe(1)
+    expect(countProblems(err, /ausearch/)).toBe(1)
+    expect(err).toContain('Bash then exits 0 at end-of-input')
+  })
+
+  it('accepts every real form of the guard, and a pipe, so the rule is not just noisy', async () => {
+    const root = await fixture(
+      [
+        'sudo ausearch -m avc -ts recent < /dev/null | tail -n 20 || true',
+        'sudo ausearch -m avc < /tmp/saved-events | tail -n 1',
+        'journalctl -k | sudo ausearch -m avc || true',
+        'timeout 25 ssh -n deploy@localhost true',
+        'timeout 25 ssh deploy@localhost true < /dev/null',
+        'sudo ausearch -m avc <<EOF\ntype=AVC msg=audit(0.0:0): denied\nEOF',
+      ].join('\n'),
+    )
+    const { code, err } = await lint(root)
+    expect(countProblems(err, /ausearch|ssh/)).toBe(0)
+    expect(code).toBe(0)
+  })
+
+  it('accepts a guard on a continuation line, which a line-at-a-time scan misses', async () => {
+    // The lesson that put this rule in a committed file. A throwaway sweep over the
+    // bank reported 160 candidates and every one was a false positive; two of them were
+    // correctly guarded invocations whose `< /dev/null` sat on the *next* physical line,
+    // exactly as `net/046`'s own `login_probe` and `tools/047`'s are written.
+    const root = await fixture(
+      ['timeout 25 ssh -o BatchMode=yes \\', '  deploy@localhost \\', '  true 2>&1 < /dev/null'].join('\n'),
+    )
+    const { code, err } = await lint(root)
+    expect(countProblems(err, /ssh/)).toBe(0)
+    expect(code).toBe(0)
+  })
+
+  it('does not read a command name out of an English message, however shell-shaped', async () => {
+    // Both spellings that made this rule report five false hits on a clean bank before
+    // `maskQuoted` existed: `(` reads as a subshell and `while` is a keyword, so each
+    // satisfied a different clause of COMMAND_POSITION from inside a sentence. The
+    // semicolon inside the quoted remote command is the third of the five — it split the
+    // trailing redirect into another segment.
+    const root = await fixture(
+      [
+        'rc=0',
+        'echo "a password login failed (ssh exited $rc), and ausearch showed nothing"',
+        'echo "firewall-ssh would pass while ssh stayed blocked"',
+        `timeout 30 ssh deploy@localhost 'set -e; : > "$HOME/probe"; rm -f "$HOME/probe"' 2>&1 < /dev/null`,
+      ].join('\n'),
+    )
+    const { code, err } = await lint(root)
+    expect(countProblems(err, /ausearch|ssh/)).toBe(0)
+    expect(code).toBe(0)
+  })
+
+  it('ignores a command that is only named, never run', async () => {
+    const root = await fixture(['command -v ausearch >/dev/null || echo missing', '# sudo ausearch -m avc'].join('\n'))
+    const { code, err } = await lint(root)
+    expect(countProblems(err, /ausearch/)).toBe(0)
+    expect(code).toBe(0)
+  })
+
+  it('reads inside a command substitution, which inherits stdin like any child', async () => {
+    // `"$(…)"` is masked as a string by nothing: the substitution runs, and it runs with
+    // the script on its stdin. This is the one place where quoting does not make a
+    // command name inert.
+    const root = await fixture('avc="$(sudo ausearch -m avc -ts recent)"\necho "${avc:-none}"')
+    const { code, err } = await lint(root)
+    expect(countProblems(err, /ausearch/)).toBe(1)
+    expect(code).toBe(1)
+  })
+
+  it('checks setup.sh and solutions too, not only anti-solutions', async () => {
+    // Same transport, same `bash -s`, same truncation. A rule that only read
+    // anti-solutions would have missed the two setup scripts that probe a login.
+    const root = await bankCopy()
+    const file = join(root, 'tasks/net/046-key-based-ssh-login/solutions/01-keygen-install-restorecon.sh')
+    const before = await readFile(file, 'utf8')
+    await writeFile(file, `${before}\nsudo aureport -a\n`, 'utf8')
+
+    const { code, err } = await lint(root)
+    expect(countProblems(err, /aureport/)).toBe(1)
+    expect(err).toContain('solutions/01-keygen-install-restorecon.sh')
+    expect(code).toBe(1)
   })
 })
 

@@ -203,6 +203,242 @@ function changesNothing(script: string): boolean {
   return true
 }
 
+/**
+ * One logical line per entry: backslash continuations joined, heredoc bodies dropped,
+ * with the physical line number the logical line started on.
+ *
+ * **This is the whole reason the check below is in a committed file rather than a
+ * one-off.** A throwaway sweep for the defect it looks for was run over this bank on
+ * 2026-09-14 and produced 160 candidates, of which every single one was a false
+ * positive, twice for the same reason: the guard it was looking for sat on the *next*
+ * physical line. `net/046`'s `login_probe` puts `< /dev/null` at the end of a
+ * three-line invocation and `tools/047`'s puts it two lines below the `ssh`, so a
+ * line-at-a-time scan reads both as unguarded. A check that cries wolf on the whole
+ * bank gets switched off, so joining continuations is not a nicety here — it is what
+ * makes the rule usable at all.
+ *
+ * Heredoc bodies are dropped because they are data, not commands: a fixture that
+ * writes a script mentioning `ausearch` into a file is not running it. The delimiter
+ * match covers `<<EOF`, `<<'EOF'`, `<<"EOF"` and `<<-EOF`; `<<<` is a here-string and
+ * opens no body, which is why the pattern requires a non-`<` character after the
+ * quote-or-word. A logical line that opens a heredoc is still returned and checked,
+ * because the command on it is real code — and it is guarded by construction, since
+ * the heredoc *is* its stdin.
+ */
+function logicalLines(script: string): Array<{ line: number; text: string }> {
+  const out: Array<{ line: number; text: string }> = []
+  const raw = script.split('\n')
+  let heredoc: string | undefined
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const physical = raw[i] ?? ''
+    if (heredoc !== undefined) {
+      // `<<-` allows leading tabs on the terminator; trimming accepts both forms.
+      if (physical.trim() === heredoc) heredoc = undefined
+      continue
+    }
+
+    const started = i + 1
+    let text = physical
+    while (text.endsWith('\\') && i + 1 < raw.length) {
+      text = `${text.slice(0, -1)} ${raw[i + 1] ?? ''}`
+      i += 1
+    }
+
+    const opener = /<<-?[ \t]*(?:(["'])([A-Za-z_][A-Za-z0-9_]*)\1|([A-Za-z_][A-Za-z0-9_]*))/.exec(text)
+    if (opener !== null && !text.includes('<<<')) heredoc = opener[2] ?? opener[3]
+
+    out.push({ line: started, text })
+  }
+
+  return out
+}
+
+/**
+ * Commands that read this bank's own script text out from under themselves.
+ *
+ * The mechanism, measured on the guest on 2026-09-14 and then reproduced on the host
+ * away from it: every script here is delivered *on bash's stdin* —
+ * `src/engine/vm/ssh.ts` pipes it into `bash -s` — so a child that reads stdin
+ * consumes **the rest of the script**. Bash then reaches end-of-input and exits **0**.
+ * No non-zero exit, no error text, no truncation notice: the fixture reports success
+ * having run half of itself, and `runFixture`'s exit-code check in
+ * `src/engine/validate/harness.ts` has nothing to catch. That is the same fail-open
+ * shape as `changesNothing` above, one layer down, and it is worse in one respect —
+ * the fixture *did* do something, so its verdict looks like a considered result and
+ * the grader gets blamed for reading the machine correctly.
+ *
+ * **The defect is transport-dependent, and that is the trap inside the trap.** Only
+ * the ssh transport delivers scripts this way; `src/engine/vm/vmrun.ts:238` writes the
+ * script to a staged file and runs `bash <file>`, so stdin is a tty or nothing and a
+ * missing redirect does no harm at all. The same fixture therefore truncates under
+ * `RHCSA_TRANSPORT=ssh` and runs to completion under vmrun — which means switching
+ * transports to "see if it is the transport" makes the symptom vanish and proves the
+ * opposite of what it appears to. A static rule does not care which transport is
+ * configured, which is the argument for checking it here rather than at runtime.
+ *
+ * It cost a real validation run. `net/046 antisolutions/04` wrote
+ * `sudo ausearch -m avc -ts recent` with no redirect; ausearch ate the ten lines
+ * below it including the `sudo setenforce 0` the whole fixture existed to perform, so
+ * the grader truthfully reported SELinux still Enforcing and the run read as a grader
+ * defect. Roughly thirty minutes of guest time to reach a wrong conclusion about the
+ * wrong file.
+ *
+ * The set is deliberately tiny, and each entry is here because it reads stdin **even
+ * when given arguments** — which is what makes the defect invisible to an author who
+ * has just written a fully-specified command line:
+ *
+ * - `ausearch` / `aureport` take their event stream from stdin whenever stdin is not
+ *   a terminal. `-ts recent` names a time window, not an input, so the command looks
+ *   complete and is not.
+ * - `ssh` and `sftp` forward stdin to the far end. `-n` is the documented guard for
+ *   `ssh` and is accepted here as one; `sftp` takes its command list from stdin
+ *   unless `-b` names a batch file.
+ *
+ * `dnf`, `parted`, `passwd` and friends are *not* here on purpose. They read stdin
+ * only when they need an answer, and every invocation in this bank supplies `-y`,
+ * `-s` or the equivalent, so listing them would flag correct lines — the failure mode
+ * that gets a lint disabled. If a prompting command ever appears unguarded it fails
+ * loudly with its own message, which is a different and much cheaper problem.
+ */
+const STDIN_READERS: ReadonlyArray<{ name: string; why: string; flag?: RegExp }> = [
+  { name: 'ausearch', why: 'ausearch reads its event stream from stdin whenever stdin is not a terminal' },
+  { name: 'aureport', why: 'aureport reads its event stream from stdin whenever stdin is not a terminal' },
+  { name: 'ssh', why: 'ssh forwards its own stdin to the remote command', flag: /(?<![-\w])-n(?![-\w])/ },
+  { name: 'sftp', why: 'sftp reads its command list from stdin unless -b names a batch file', flag: /(?<![-\w])-b(?![-\w])/ },
+]
+
+/**
+ * Quoted text blanked to `x`, with `$(…)` inside double quotes left as the code it is.
+ *
+ * **This is the load-bearing half of the check, and the character class below is not.**
+ * Without it the rule reported five hits on today's bank and all five were English
+ * prose inside a `fail "…"` message: `(ssh exited $pw_rc: …)` matched because `(`
+ * reads as a subshell, and `so firewall-ssh would pass while ssh stayed blocked`
+ * matched because `while` is a shell keyword. Two independent spellings of "this word
+ * is in a sentence, not in a command", found by two different clauses of the pattern —
+ * which is the argument for deciding it lexically instead of adding a sixth clause.
+ * This bank's `fail` and `ck_fail` details are long, deliberately explanatory English,
+ * and they mention the commands they are about; any rule that reads them as code will
+ * be wrong about this content forever.
+ *
+ * Splitting is done on the masked text too, and that fixes a second false positive of
+ * the same five: the `;` inside `ssh host 'set -e; …; printf "ok\n"'` cut the trailing
+ * `< /dev/null` into a later segment, so a correctly guarded invocation read as
+ * unguarded. Bash does not see that `;` as a separator and neither should this.
+ *
+ * Command substitution is exempted because `x="$(sudo ausearch -m avc)"` really does
+ * run a command with the script on its stdin — a substitution inherits stdin like any
+ * child. Inside *single* quotes it stays masked, since bash performs no substitution
+ * there.
+ *
+ * Two residuals, left open deliberately rather than overlooked. A command run through
+ * an interpreter argument — `sudo sh -c 'ausearch -m avc'` — is masked and not seen;
+ * catching it means parsing the quoted string as a script, and nothing in the bank
+ * does this. And quote state does not span physical lines, so an unterminated quote
+ * masks only to end of line; `troubleshooting/028`'s multi-line `awk` program is the
+ * live example, and it contains nothing this rule looks for.
+ */
+function maskQuoted(text: string): string {
+  const out = [...text]
+  const stack: Array<'sq' | 'dq' | 'sub'> = []
+
+  for (let i = 0; i < out.length; i += 1) {
+    const c = out[i]
+    const top = stack[stack.length - 1]
+
+    if (top === 'sq') {
+      if (c === "'") stack.pop()
+      else out[i] = 'x'
+      continue
+    }
+
+    if (top === 'dq') {
+      if (c === '\\') {
+        out[i] = 'x'
+        if (i + 1 < out.length) out[i + 1] = 'x'
+        i += 1
+        continue
+      }
+      if (c === '"') {
+        stack.pop()
+        continue
+      }
+      if (c === '$' && out[i + 1] === '(') {
+        stack.push('sub')
+        i += 1
+        continue
+      }
+      out[i] = 'x'
+      continue
+    }
+
+    // Code: the top level, or inside a command substitution.
+    if (c === '\\') i += 1
+    else if (c === "'") stack.push('sq')
+    else if (c === '"') stack.push('dq')
+    else if (c === '$' && out[i + 1] === '(') {
+      stack.push('sub')
+      i += 1
+    } else if (c === ')' && top === 'sub') stack.pop()
+  }
+
+  return out.join('')
+}
+
+/**
+ * Whether the text immediately before a match puts that word in **command position**.
+ *
+ * Second line of defence, after `maskQuoted` has removed the prose. What is left for
+ * this to exclude is code that names a command without running it: `command -v ssh`,
+ * and `ssh` as a firewalld *service* name in `in_list "$(zfield …)" ssh`. The
+ * checkpoint id `firewall-ssh` is handled by the caller's `(?<![-\w])` guard, which
+ * also keeps `ssh-keygen` and `openssh-server` out.
+ *
+ * A segment ending in `|` is **not** command position: that command's stdin is the
+ * pipe, not the script, so it is guarded by construction and flagging it would be
+ * wrong rather than merely noisy.
+ */
+const COMMAND_POSITION =
+  /(?:^|[;&(){]|\$\(|`|(?<![-\w])(?:sudo|nohup|time|exec|then|do|else|elif|if|while|until|not)(?![-\w])|(?<![-\w])timeout[ \t]+\S+)[ \t]*$/
+
+/**
+ * Unguarded stdin-consuming commands, as `line: command` strings.
+ *
+ * A command counts as guarded by *any* stdin redirection on its own segment — `<
+ * /dev/null`, `< somefile`, a heredoc, a here-string — because all of them replace the
+ * script text with something else, which is the only property that matters. `-n` on
+ * `ssh` counts too. The rule is per pipeline segment rather than per logical line, so
+ * `a && sudo ausearch …` is judged on the `sudo ausearch` half.
+ */
+function unguardedStdinReaders(script: string): string[] {
+  const found: string[] = []
+
+  for (const { line, text } of logicalLines(script)) {
+    if (text.trim().startsWith('#')) continue
+    const masked = maskQuoted(text)
+
+    // `&&`, `||` and `;` separate pipelines; within a pipeline only the leftmost
+    // stage inherits the script's stdin. Splitting in that order keeps `a | b && c`
+    // read as `(a|b) && (c)`, which is how bash reads it.
+    for (const pipeline of masked.split(/\|\||&&|;/)) {
+      const segment = pipeline.split('|')[0] ?? ''
+      if (/<[^<]/.test(segment) || segment.includes('<<')) continue
+
+      for (const { name, why, flag } of STDIN_READERS) {
+        for (const m of segment.matchAll(new RegExp(String.raw`(?<![-\w])${name}(?![-\w])`, 'g'))) {
+          const before = segment.slice(0, m.index)
+          if (!COMMAND_POSITION.test(before)) continue
+          if (flag?.test(segment) === true) continue
+          found.push(`${line}: ${name} — ${why}`)
+        }
+      }
+    }
+  }
+
+  return found
+}
+
 /** Every `.sh` under `dir`, recursively. Sorted by the caller, because readdir order is not guaranteed. */
 async function shellScripts(dir: string): Promise<string[]> {
   const out: string[] = []
@@ -610,6 +846,21 @@ export async function lintContent(root: string, opts: LintOptions = {}): Promise
     }
   }
   if (bank !== undefined) await checkFixtureFloors(bank, new Set(graders), rel, problems)
+
+  // Every `.sh` in the bank, not just graders and anti-solutions: `setup.sh` and the
+  // solutions are piped into `bash -s` by exactly the same transport, so they truncate
+  // themselves in exactly the same way. `content/lib/assert.sh` is concatenated onto
+  // the front of every grader, which makes it the one file where this defect would be
+  // a bank-wide outage rather than one wrong verdict.
+  for (const file of files) {
+    for (const hit of unguardedStdinReaders(text.get(file) ?? '')) {
+      problems.push(
+        `${rel(file)}:${hit}, and this script arrives on bash's stdin (ssh.ts pipes it to "bash -s"), so it ` +
+          `consumes the rest of the script. Bash then exits 0 at end-of-input: no error, no non-zero exit, ` +
+          `half the script never ran. Add "< /dev/null".`,
+      )
+    }
+  }
 
   for (const grader of graders) {
     emittedByTask.set(taskDirOf(grader), new Set(checkpointIds(text.get(grader) ?? '')))

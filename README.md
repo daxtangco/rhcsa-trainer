@@ -18,9 +18,12 @@ a quiz bolted onto a book.
    You need a RHEL 9 binary DVD ISO from your own Red Hat Developer account.
 2. Check that WSL can reach it: `bash scripts/r1-probe.sh`.
 3. Configure it: `bash scripts/provision.sh`.
-4. Check the content bank's state: `npm run coverage`. It reports five tasks
-   and ten concepts against 68 objectives, and exits 0. Most objectives have
-   no task yet — that is Phase 2's job, not a broken install.
+4. Check the content bank's state: `npm run coverage`. It prints the task,
+   concept and objective counts and the gap lists, and exits 0. A long
+   `uncovered objectives` list is the expected reading, not a broken install:
+   the objective taxonomy is the whole RHCSA and the bank is being authored
+   against it. `docs/coverage-phase-1.md` is the same report with the reasons
+   written down, and is the file to compare against.
 
 ### Before you have a VM
 
@@ -118,7 +121,22 @@ npm run validate -- storage/014-grow-home-lv     # one task, 6 fixtures
 npm run validate                                 # the whole bank - see the warning below
 npm test                                         # unit tests, no VM needed
 npm run test:vm                                  # VM-dependent suites, including the e2e
+npm run corpus                                   # regenerate corpus/ from the PDFs, needs poppler
 ```
+
+`npm run corpus` regenerates `corpus/` from the two source PDFs. It is the only
+one of these that is not reproducible from a clean checkout: it shells out to
+`pdftotext -layout` (poppler), and it expects the two PDFs at the paths hardcoded
+in `scripts/extract-corpus.ts`. Nothing else needs it — `corpus/` is committed —
+so run it only after changing the extractor, and check the counts in
+`test/corpus/corpus-real.test.ts` afterwards, since every one of them is a
+measurement of the artifact it produces.
+
+Use the poppler RHEL 9 ships, 21.01.0. Not a style preference: `-layout` column
+spacing differs between poppler versions, so a newer one rewrites bodies without
+moving a single count, and the counts are what the tests watch. On this host it is
+unpacked rather than installed — `extract()`'s comment carries the recipe, which
+needs no root.
 
 `npm run lint:content` is the only content gate that needs no hypervisor. It
 reads the graders statically: every id a `# baseline-fail:`, `# expect-fail:` or
@@ -135,6 +153,28 @@ With no arguments it loads the whole bank, and the transport is chosen once
 for the run: a single task declaring `transport: vmrun` pushes every fixture
 through the slow path. Name the SSH tasks explicitly and run the `vmrun` ones
 separately. `docs/exit-criterion.md` has the two commands.
+
+The choice is only ever a requirement in that one direction, so **read the
+`transport:` line of the output before you trust a pass.** A task declaring
+`transport: ssh` gets validated over vmrun whenever the SSH probe fails, and it
+says so in a `warning:` on stderr naming each affected task. That is not
+pedantry: `storage/014-grow-home-lv` once failed two post-reboot checkpoints over
+ssh and then passed 6/6 over vmrun with nothing changed in between, because its
+`02-removed-persistence.sh` comments `/home` out of fstab and takes
+`/home/student/.ssh/authorized_keys` down with it — a failure vmrun cannot see,
+since it grades through `vmtoolsd` and never authenticates. Set
+`RHCSA_TRANSPORT=ssh` to insist; it errors out instead of falling back.
+
+That particular fixture is fixed rather than merely diagnosed: the post-reboot
+grade run now retries over vmrun when the chosen channel produced no checkpoints
+at all, so pinning 014 to ssh gives 6/6 and a `note:` naming the fallback instead
+of a failure (`GradeOptions.fallback` in `src/engine/grading/grader.ts` explains
+the three ways it is deliberately narrow). **Read that note when it appears.** It
+means verdict B came from a channel you did not choose, which is a weaker claim
+than the pass it sits under — and the warning above still matters, because the
+fallback covers the post-reboot run only. Nothing rescues `setup.sh`, the fixture
+script, or verdict A: a task that cannot be *set up* over the chosen transport
+must fail loudly, not half-run somewhere else.
 
 ### Adding content
 
@@ -153,7 +193,22 @@ rules the validator enforces:
 - `requires_concepts` lists cards that exist. A missing card is a load error,
   not a warning.
 
-And four conventions the validator does not enforce, or enforces only in part:
+And five conventions the validator does not enforce, or enforces only in part:
+
+- **Any command that might read stdin needs `< /dev/null`.** Every script here is
+  delivered *on bash's stdin* — the transport pipes it into `bash -s` — so a child
+  that reads stdin consumes the rest of the script, and bash then exits **0** at
+  end-of-input. No error, no non-zero exit, half the script never ran, and the
+  fixture reports success. `ausearch` and `aureport` are the ones that catch people
+  out, because they take their event stream from stdin whenever stdin is not a
+  terminal: `-ts recent` names a time window, not an input, so the command line
+  looks complete and is not. `ssh` needs `-n` or the redirect; `sftp` needs `-b`.
+  This cost `net/046 antisolutions/04` a full validation run — ausearch ate the
+  `sudo setenforce 0` the fixture existed to perform, and the grader was blamed for
+  reading the machine correctly. `npm run lint:content` now checks this, and only
+  for commands that read stdin *even when given arguments*; prompting commands like
+  `dnf` and `parted` are excluded on purpose, because they fail loudly with their
+  own message and listing them would flag correct lines.
 
 - **Checkpoint ids are lowercase kebab-case** — `fs-home-size`, not
   `FS_Home_Size`. `npm run lint:content` enforces this; the runtime counter
