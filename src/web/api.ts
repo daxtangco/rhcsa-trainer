@@ -5,6 +5,19 @@
 // `phase === 'gradedd'` compile and silently never match.
 import type { SessionMode, SessionPhase } from '../server/session.ts'
 export type { SessionMode, SessionPhase }
+// Same reasoning, one layer further in: the guided walkthrough the Learn screen
+// renders is `src/engine/guided/select.ts`'s own type, imported rather than
+// restated. A restated copy is a second definition of a 5-field nested shape
+// that no compiler compares, and the field this screen would get wrong is
+// `alternate` - optional on the engine's type for the 12 slots of 96 that have
+// no second edition. Type-only, so `verbatimModuleSyntax` erases it and the
+// engine's loaders (which read the filesystem) never reach the bundle;
+// `typedStepMatches` is imported as a value in the walkthrough, and that one
+// module has no Node built-ins by design.
+import type { GuidedItem, GuidedText } from '../engine/guided/select.ts'
+import type { GuidedStep } from '../engine/guided/steps.ts'
+import type { Edition } from '../engine/corpus/items.ts'
+export type { Edition, GuidedItem, GuidedStep, GuidedText }
 
 export interface TaskSummary {
   id: string
@@ -43,6 +56,19 @@ export interface StartedSession {
   taskTransport: 'ssh' | 'vmrun'
   /** What the server is actually using. The same value `/api/health` reports. */
   transport: 'ssh' | 'vmrun'
+  /**
+   * Whether the guest's default route was dropped for this mode (§10.3: drill and
+   * exam). Sent for every mode, not only the offline ones, because the student
+   * needs to know which situation they are in before they reach for `curl`.
+   */
+  offline: boolean
+  /**
+   * Present only when the guest is not in the state `offline` claims. The
+   * session still opened - a degraded lab is better than no lab - so this is the
+   * only thing standing between the student and a false belief about their own
+   * machine, and the rail shows it as a warning rather than a note.
+   */
+  offlineWarning?: string
 }
 
 /**
@@ -66,6 +92,15 @@ export interface SessionView {
    * makes the guard mode-dependent.
    */
   phase: SessionPhase
+  /**
+   * Only `/reset` fills these in, and it has to: the revert restores the running
+   * kernel, so the guest comes back online and the server re-applies the mode's
+   * network state afterwards. That second attempt can fail where the first
+   * succeeded, so the answer travels back with the reset rather than being
+   * remembered from session start. `GET /api/sessions/:id` omits both.
+   */
+  offline?: boolean
+  offlineWarning?: string
 }
 
 /** One concept card, named but not opened. `/api/tasks/:area/:slug` returns these. */
@@ -166,6 +201,84 @@ export interface HintResponse {
   all?: RungContentView[]
 }
 
+/**
+ * One card in the concept graph, as `GET /api/concepts` lists them.
+ *
+ * `taught` and `reachable` are the two facts the Concepts screen can state, and
+ * both are facts about **the bank**, not about the student: `taught` means some
+ * task's `requires_concepts` names this card, `reachable` means it is that or a
+ * transitive prerequisite of one (`CoverageReport` in
+ * `src/engine/content/bank.ts` computes both). Section 11 asks for four states,
+ * and the other two — needed-again, demonstrated-cold — are facts about the
+ * student that live in `concept_state.times_needed` and
+ * `concept_state.demonstrated_cold`. `src/engine/store/schema.ts` says in as many
+ * words that nothing writes that table yet, so those two are absent from this
+ * type rather than present and always zero. A zero that is really "unmeasured"
+ * is the one thing section 9.4 forbids this app from rendering.
+ */
+export interface ConceptNode {
+  id: string
+  title: string
+  area: string
+  objectives: string[]
+  prerequisites: string[]
+  /** Some task's `requires_concepts` names it, so the student can be shown it. */
+  taught: boolean
+  /** It, or a transitive prerequisite of one that is. Stricter than `taught`. */
+  reachable: boolean
+  requiredByTasks: string[]
+}
+
+export interface ConceptGraphView {
+  concepts: ConceptNode[]
+  /**
+   * Authoring bugs: a `requires_concepts` or prerequisite that does not resolve.
+   * Rendered first and loudly on the Concepts screen — risk R7's mitigation is
+   * that a missing card is *visible, not silent*, and a problem list folded into
+   * a corner is silent.
+   */
+  problems: string[]
+}
+
+/**
+ * What the guest is known to be carrying, from `vm_state`'s single row.
+ *
+ * Every field is nullable, and the two shapes of "nothing known" are different
+ * and both real. `OverviewView.vm === null` is no row at all: the store has never
+ * been written, which is the state of a fresh install. `currentTask === null` on
+ * a row that exists is `VmStateStore.unknown()` — written deliberately before a
+ * revert, so that an interrupted revert reads as unknown rather than as the
+ * previous task. Neither is an error, and UI rule 1 makes rendering them a
+ * requirement rather than a nicety.
+ */
+export interface VmStateView {
+  snapshot: string | null
+  currentTask: string | null
+  appliedAt: number
+}
+
+/**
+ * `GET /api/overview`: what the bank and the history can be counted without a
+ * scheduler. Every field here is a count of something that exists on disk or in
+ * the attempts table today; nothing in it is a readiness estimate, and the
+ * Dashboard says so in words rather than filling the gap with these numbers.
+ */
+export interface OverviewView {
+  tasks: { total: number; byScope: Record<string, number> }
+  /**
+   * `covered` / `uncovered` split the taxonomy by whether an **exam-objective
+   * task** exercises it. `untouched` is section 6.2's stricter claim, verbatim
+   * from `CoverageReport.untouchedObjectives`: no task of any scope exercises it
+   * *and* no card teaches toward it. All three are properties of the content, not
+   * of the student's history — an objective can be `covered` and never attempted.
+   */
+  objectives: { total: number; covered: number; uncovered: number; untouched: number }
+  concepts: { total: number; untaught: number; unreachable: number }
+  /** `clean` is the generated column: an attempt with no drift signal on it. */
+  attempts: { total: number; clean: number; byMode: Record<string, number> }
+  vm: VmStateView | null
+}
+
 export class ApiError extends Error {
   readonly status: number
   constructor(status: number, message: string) {
@@ -234,6 +347,19 @@ export function createApi(fetchImpl: typeof fetch = fetch) {
     // percent-encoded.
     task: (id: string) => call<TaskDetail>(`/api/tasks/${id}`),
     concept: (id: string) => call<ConceptCard>(`/api/concepts/${id}`),
+    overview: () => call<OverviewView>('/api/overview'),
+    /**
+     * The whole graph. Named `conceptGraph` and not `concepts` so it cannot be
+     * confused at a call site with `concept(id)` above, which returns one card's
+     * *body* — this returns 40 cards' metadata and no body at all.
+     */
+    conceptGraph: () => call<ConceptGraphView>('/api/concepts'),
+    /** Like `task`, the id already contains the slash the route needs. */
+    guidedForTask: async (taskId: string): Promise<GuidedItem[]> =>
+      (await call<{ items: GuidedItem[] }>(`/api/guided/task/${taskId}`)).items,
+    /** Objective ids are dotted (`net.firewall.settings`), so there is no slash to preserve. */
+    guidedForObjective: async (id: string): Promise<GuidedItem[]> =>
+      (await call<{ items: GuidedItem[] }>(`/api/guided/objective/${encodeURIComponent(id)}`)).items,
     start: (taskId: string, mode: SessionMode) =>
       post<StartedSession>('/api/sessions', { taskId, mode }),
     hint: (id: string) => post<HintResponse>(`/api/sessions/${id}/hint`),
@@ -244,3 +370,16 @@ export function createApi(fetchImpl: typeof fetch = fetch) {
     finish: (id: string) => post<FinishResponse>(`/api/sessions/${id}/finish`),
   }
 }
+
+/**
+ * The client, as the screens receive it.
+ *
+ * Derived from `createApi` rather than declared, so a route that changes shape
+ * breaks the screens that read it instead of letting this interface drift into
+ * describing an API that no longer exists — the same trick
+ * `test/web/app.test.tsx` plays with its `shapeCheck`. Screens take it as a prop
+ * because `App` holds exactly one instance: a screen that called `createApi()` at
+ * its own module scope would be a second base URL to keep in step and a second
+ * thing for a test to mock.
+ */
+export type Api = ReturnType<typeof createApi>

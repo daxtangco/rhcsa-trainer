@@ -80,6 +80,9 @@ const fake = {
       rebootCheck: false,
       taskTransport: 'ssh',
       transport: 'ssh',
+      // Derived from the mode the caller asked for, the same way the server derives
+      // it, so a test that starts an exam cannot be quietly handed an online guest.
+      offline: m === 'drill' || m === 'exam',
     }
   }),
   hint: vi.fn(async () => ({
@@ -99,6 +102,21 @@ const fake = {
       phase: 'active',
     }),
   ),
+  // The four Phase 2 reads, present because `shapeCheck` below compares this
+  // object to the whole client and would otherwise fail to compile. The lab
+  // calls none of them - `App` mounts the Dashboard, Learn and Concepts screens
+  // only when they are opened - and `test/web/nav.test.tsx` asserts exactly that
+  // rather than leaving it to these stubs to prove.
+  overview: vi.fn(async () => ({
+    tasks: { total: 1, byScope: { 'exam-objective': 1 } },
+    objectives: { total: 1, covered: 1, uncovered: 0, untouched: 0 },
+    concepts: { total: 1, untaught: 0, unreachable: 0 },
+    attempts: { total: 0, clean: 0, byMode: {} },
+    vm: null,
+  })),
+  conceptGraph: vi.fn(async () => ({ concepts: [], problems: [] })),
+  guidedForTask: vi.fn(async () => []),
+  guidedForObjective: vi.fn(async () => []),
   grade: vi.fn(async (): Promise<GradeResponse> => GRADED),
   finish: vi.fn(
     async (): Promise<FinishResponse> => ({
@@ -276,6 +294,39 @@ describe('App, guided mode', () => {
 })
 
 describe('App, a rated mode', () => {
+  it('clears a stale offline warning when the reset comes back clean', async () => {
+    // The reset reverts the guest and the server re-applies the mode's network
+    // state afterwards, so the answer from session start is out of date either way
+    // it went. An amber "you still have internet access" left standing beside a
+    // guest that is now genuinely offline is the same lie as the reverse - it
+    // teaches the student to disbelieve the badge, and then the real warning is
+    // just more furniture.
+    resetFake()
+    const started = fake.start.getMockImplementation()
+    if (started === undefined) throw new Error('the fake client lost its start implementation')
+    fake.start.mockImplementationOnce(async (taskId: string, m: SessionMode) => ({
+      ...(await started(taskId, m)),
+      offlineWarning: 'offline mode could not be applied, so this exam session still has internet access: sudo: no tty present',
+    }))
+
+    await enterLab(/^Exam /)
+    expect(screen.getByText(/still has internet access/i)).toBeDefined()
+
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await act(async () => {
+        screen.getByRole('button', { name: /reset lab/i }).click()
+      })
+    } finally {
+      confirm.mockRestore()
+    }
+
+    await waitFor(() => expect(screen.queryByText(/still has internet access/i)).toBeNull())
+    // And the claim the warning was contradicting is back: this fake's `/reset`
+    // omits `offline`, which is the "unchanged" answer, so exam mode still says so.
+    expect(screen.getByText(/no default route in exam mode/i)).toBeDefined()
+  })
+
   it('drops the stale tally when a re-grade fails, and shows the rating at finish', async () => {
     // Item 5. What this prevents: the green verdict from the previous grade left
     // standing next to an error box, which claims a pass for a machine state that
