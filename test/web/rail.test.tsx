@@ -25,6 +25,10 @@ function session(over: Partial<StartedSession> = {}): StartedSession {
     // because they mean different things: see mandate 1.
     taskTransport: 'ssh',
     transport: 'ssh',
+    // The default is exam mode, so the honest default is offline. Overridden per
+    // test; the point of it being required rather than optional is that a fixture
+    // cannot decline to say.
+    offline: true,
     ...over,
   }
 }
@@ -140,6 +144,39 @@ describe('Rail', () => {
     // that sentence over an 0/5 run and no test noticed.
     expect(screen.queryByText(/every checkpoint that ran passed/i)).toBeNull()
     expect(screen.getByText(/not all checkpoints passed/i)).toBeDefined()
+  })
+
+  it('says the guest is offline, and admits what that does not cover', () => {
+    render(<Rail {...props} session={session({ offline: true })} rung={1} />)
+    expect(screen.getByText(/no default route in exam mode/i)).toBeDefined()
+    // §10.3's own honest limit, on the screen rather than only in the docs. A
+    // habit device presented as a cage teaches the student to trust a boundary
+    // that is not there.
+    expect(screen.getByText(/cannot stop a browser on your host/i)).toBeDefined()
+  })
+
+  it('says nothing about the network in an online mode', () => {
+    render(<Rail {...props} session={session({ mode: 'practice', offline: false })} rung={1} />)
+    expect(screen.queryByText(/no default route/i)).toBeNull()
+  })
+
+  it('shows the doubt instead of the claim when offline mode could not be applied', () => {
+    // The two must never both be on screen. A student reading "no default route"
+    // beside "you still have internet access" cannot tell which is true, and the
+    // consequence of picking wrong is a whole exam rehearsal spent with the web
+    // open, learning the habit this feature exists to prevent.
+    render(
+      <Rail
+        {...props}
+        session={session({
+          offline: true,
+          offlineWarning: 'offline mode could not be applied, so this exam session still has internet access: sudo: no tty present',
+        })}
+        rung={1}
+      />,
+    )
+    expect(screen.getByText(/still has internet access/i)).toBeDefined()
+    expect(screen.queryByText(/no default route/i)).toBeNull()
   })
 
   it('calls onGrade when the grade button is pressed', () => {

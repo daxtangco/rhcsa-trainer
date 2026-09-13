@@ -69,6 +69,8 @@ function verdictFor(
 const WARN = 'rounded border border-amber-800 bg-amber-950/40 p-2 text-xs text-amber-200'
 const ALARM = 'rounded border border-rose-800 bg-rose-950/40 p-2 text-xs text-rose-200'
 const LABEL = 'uppercase tracking-wide text-xs text-zinc-500'
+/** Neither a warning nor an alarm: a true statement about the machine. */
+const NOTE = 'rounded border border-zinc-800 bg-zinc-900 p-2 text-xs text-zinc-400'
 
 export function Rail(props: RailProps) {
   const { session, rung, elapsedS, report, busy } = props
@@ -239,6 +241,24 @@ export function Rail(props: RailProps) {
 
       {report?.rebootError !== undefined ? (
         <div className={WARN}>The reboot check could not run: {report.rebootError}</div>
+      ) : null}
+
+      {/*
+        §10.3. The warning outranks the note and replaces it: showing both would
+        put "you are offline" and "you may not be offline" in the same corner of
+        the same screen. A student who believes the wrong one of those learns the
+        wrong habit from a run that looked right, so when the two disagree only the
+        doubt is shown.
+      */}
+      {session.offlineWarning !== undefined ? (
+        <div className={WARN}>{session.offlineWarning}</div>
+      ) : session.offline ? (
+        <div className={NOTE}>
+          No default route in {session.mode} mode: <code>curl</code> and internet{' '}
+          <code>dnf</code> will fail. <code>man</code> and <code>/usr/share/doc</code> are what you
+          get in the exam, so they are what you get here. It cannot stop a browser on your host —
+          that part is on you.
+        </div>
       ) : null}
 
       {mismatch ? (
