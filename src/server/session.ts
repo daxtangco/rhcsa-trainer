@@ -7,6 +7,7 @@ import {
 } from '../engine/disclosure/ladder.ts'
 import { finalVerdict, type GradeResult } from '../engine/grading/grader.ts'
 import { allPassed, statusById, type CheckpointStatus } from '../engine/grading/verdict.ts'
+import type { PredictedOutcome } from '../engine/store/schema.ts'
 import { declaredCheckpointIds } from '../engine/validate/expectations.ts'
 
 export type SessionMode = 'guided' | LadderMode
@@ -32,6 +33,26 @@ export interface SessionRecord {
   endedAt?: number
   phase: SessionPhase
   result?: GradeResult
+  /**
+   * Section 10.2's one click before grading, and the field the whole 2×2 rests on.
+   * Absent means the student did not predict, which is a third state and not a
+   * default — `calibration.ts` counts those attempts out rather than guessing.
+   */
+  predictedOutcome?: PredictedOutcome
+  /**
+   * Whether a grading run has ever produced a verdict for this session.
+   *
+   * **Monotonic, and deliberately not cleared by `restart`.** `s.result` alone
+   * cannot answer "has this student seen a verdict yet", because `restart` deletes
+   * it — so after grade → reset, a `phase`/`result` check reads as a session that
+   * has never graded, and a *first* prediction recorded there would be a prediction
+   * made with the previous verdict in hand. Section 10.2's quadrants are computed
+   * against the actual outcome; a contaminated prediction does not add noise to
+   * them, it moves an attempt into the wrong quadrant and inverts the remedy the
+   * quadrant implies. Same reasoning as the rung surviving a reset: what the student
+   * has already been told stays told.
+   */
+  sawVerdict: boolean
 }
 
 /**
@@ -770,6 +791,7 @@ export class SessionStore {
       missingDeclared: count.missingDeclared,
       startedAt: now,
       phase: 'active',
+      sawVerdict: false,
     }
     this.#byId.set(record.id, record)
     return record
@@ -814,6 +836,10 @@ export class SessionStore {
    * makes `/finish` answer its existing 409 "nothing has been graded yet"
    * instead, which is true. That keeps reset-to-retry working, which a 409 on
    * `/reset`-after-grade would not.
+   *
+   * `sawVerdict` and `predictedOutcome` survive alongside the rung, for the rung's
+   * reason: a reset must not launder what the student has already been told or
+   * already claimed. See `sawVerdict`.
    */
   restart(id: string, now: number): SessionRecord {
     const s = this.#require(id)
@@ -830,6 +856,22 @@ export class SessionStore {
   record(id: string, result: GradeResult): SessionRecord {
     const s = this.#require(id)
     s.result = result
+    // Set here rather than in `/finish`, because what disqualifies a later
+    // prediction is the student *seeing* a verdict, and `/grade` is where that
+    // happens — repeatably, and long before anything is finished. See `sawVerdict`.
+    s.sawVerdict = true
+    return s
+  }
+
+  /**
+   * Record section 10.2's pre-grade click. The ordering rules that make the
+   * measurement worth anything live at the route, which is where the student's
+   * request arrives and where the reasoning can be read next to the status code it
+   * produces; this is the write.
+   */
+  predict(id: string, predicted: PredictedOutcome): SessionRecord {
+    const s = this.#require(id)
+    s.predictedOutcome = predicted
     return s
   }
 

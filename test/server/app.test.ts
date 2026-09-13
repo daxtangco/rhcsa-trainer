@@ -7,6 +7,7 @@ import type { TaskSpec } from '../../src/engine/content/task.ts'
 import type { ConceptSpec } from '../../src/engine/content/concept.ts'
 import type { TaskScripts } from '../../src/engine/validate/harness.ts'
 import { parseVerdict } from '../../src/engine/grading/verdict.ts'
+import { OFFLINE_STATE_FILE } from '../../src/engine/vm/offline.ts'
 
 const TASK = {
   id: 'storage/014-grow-home-lv',
@@ -192,15 +193,42 @@ function num(root: unknown, ...path: Array<string | number>): number {
   return v
 }
 
+/**
+ * Which §10.3 script this is, or `undefined` if it is not one.
+ *
+ * Keyed on the two scripts' one structural difference - enforcement writes the
+ * state file, restoration removes it - rather than on a phrase in a comment, so
+ * a reworded script keeps its label. A third script that mentions the state file
+ * without doing either (the status probe) deliberately falls through to the
+ * `exec:` label, where it will break an ordering assertion loudly instead of
+ * being quietly counted as one of these two.
+ */
+function offlineLabel(script: string): 'offline:enforce' | 'offline:restore' | undefined {
+  if (!script.includes(OFFLINE_STATE_FILE)) return undefined
+  if (script.includes('rm -f "$STATE"')) return 'offline:restore'
+  if (script.includes('tee "$STATE"')) return 'offline:enforce'
+  return undefined
+}
+
 function runtime(over: Partial<LabRuntime> = {}) {
   const calls: string[] = []
   const rt: LabRuntime = {
     transportKind: 'ssh',
+    // The name `reset` reverts to, which the stale-state guard records beside the
+    // task. No test in this file wires a `vmState` store, so nothing reads it here.
+    snapshot: 'clean',
     reset: async () => {
       calls.push('reset')
     },
     exec: async (script) => {
-      calls.push(`exec:${script.trim()}`)
+      // The §10.3 route scripts are hundreds of lines and are not what any test in
+      // this file is about; they get one short label so the ordering assertions
+      // below stay readable while still *seeing* the call. What those scripts
+      // actually do to a routing table is `test/vm-offline/`'s subject, against a
+      // stubbed `ip`. This runtime answers them with silence, which is why every
+      // session started here also carries an `offlineWarning` - asserted directly
+      // in 'reports a guest that would not go offline'.
+      calls.push(offlineLabel(script) ?? `exec:${script.trim()}`)
       return { stdout: '', stderr: '', code: 0 }
     },
     gradeTask: async () => {
@@ -306,8 +334,79 @@ describe('POST /api/sessions', () => {
     expect(at(body, 'rung')).toBe(1)
     expect(at(body, 'maxRung')).toBe(2)
     expect(at(body, 'transport')).toBe('ssh')
-    // Order matters: a setup that runs before the revert is undone by it.
-    expect(calls).toEqual(['reset', 'exec:echo setup'])
+    // Order matters twice over: a setup that runs before the revert is undone by
+    // it, and offline mode goes on *after* setup, because a setup.sh may install
+    // from the ISO-backed repo and §4.2's "packages still work offline" is not a
+    // claim this project has measured yet.
+    expect(calls).toEqual(['reset', 'exec:echo setup', 'offline:enforce'])
+  })
+
+  it('leaves guided and practice online, and says which it did', async () => {
+    // §9.1: practice is the untimed mode with the whole ladder open. A mode that
+    // withholds nothing else has no business withholding the internet, and guided
+    // mode is handing over the command to type.
+    for (const mode of ['guided', 'practice'] as const) {
+      const { a, calls } = app()
+      const res = await a.request('/api/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ taskId: TASK.id, mode }),
+        headers: { 'content-type': 'application/json' },
+      })
+      expect(res.status).toBe(201)
+      expect(at(await res.json(), 'offline')).toBe(false)
+      // Restore, not "skip": the previous session in this VM may have been an exam,
+      // and a practice run on a guest still missing its default route is a student
+      // told they are online while they are not.
+      expect(calls).toEqual(['reset', 'exec:echo setup', 'offline:restore'])
+    }
+
+    const { a } = app()
+    const res = await a.request('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: TASK.id, mode: 'drill' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    expect(at(await res.json(), 'offline')).toBe(true)
+  })
+
+  it('reports a guest that would not go offline instead of claiming it went', async () => {
+    // The one outcome this feature cannot afford is a student told they are offline
+    // while they are not - they would sit an exam rehearsal with the internet open
+    // and learn the wrong habit from a run that looked right. This runtime answers
+    // the route script with silence, which is exactly what a guest that never ran
+    // it looks like.
+    const { a } = app()
+    const res = await a.request('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: TASK.id, mode: 'exam' }),
+      headers: { 'content-type': 'application/json' },
+    })
+
+    // Still 201. A degraded session is not a lost one, and refusing to open it
+    // would cost real practice to protect a nicety.
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    expect(at(body, 'offline')).toBe(true)
+    expect(String(at(body, 'offlineWarning'))).toMatch(/still has internet access/)
+  })
+
+  it('opens the session even when the network scripts throw', async () => {
+    const { a } = app({
+      exec: async (script) => {
+        if (offlineLabel(script) !== undefined) throw new Error('ssh: connection reset')
+        return { stdout: '', stderr: '', code: 0 }
+      },
+    })
+    const res = await a.request('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: TASK.id, mode: 'exam' }),
+      headers: { 'content-type': 'application/json' },
+    })
+
+    expect(res.status).toBe(201)
+    expect(String(at(await res.json(), 'offlineWarning'))).toMatch(
+      /is offline is unknown: ssh: connection reset/,
+    )
   })
 
   it('reports the task transport and the server transport as separate fields', async () => {
@@ -471,12 +570,40 @@ describe('POST /api/sessions/:id/reset', () => {
     expect(res.status).toBe(200)
     const after = await res.json()
 
-    expect(calls).toEqual(['reset', 'exec:echo setup', 'reset', 'exec:echo setup'])
+    // The network state is re-applied after the second revert, not assumed to have
+    // survived it: the revert restores the running kernel, so the default route is
+    // back and /run/rhcsa-offline.state is gone. In practice mode both calls are
+    // restores; the mode that this protects is exam, where the missing second call
+    // would hand the student the internet for the rest of the attempt.
+    expect(calls).toEqual([
+      'reset',
+      'exec:echo setup',
+      'offline:restore',
+      'reset',
+      'exec:echo setup',
+      'offline:restore',
+    ])
     // The clock restarts and nothing else does. A reset that also rolled the
     // rung back would make hints refundable.
     expect(num(after, 'startedAt')).toBeGreaterThan(num(before, 'startedAt'))
     expect(at(after, 'rung')).toBe(2)
     expect(at(after, 'phase')).toBe('active')
+  })
+
+  it('re-drops the default route after the revert puts it back, in exam mode', async () => {
+    // The revert is what makes this necessary rather than merely tidy: it restores
+    // the powered-on `clean` snapshot, which is a running kernel with its default
+    // route and an empty /run. Enforcing only at session start means one Reset
+    // silently returns an exam-mode student to the internet while the response
+    // still says `offline: true`.
+    const { a, calls } = app()
+    const id = await start(a, 'exam')
+    calls.length = 0
+
+    const res = await a.request(`/api/sessions/${id}/reset`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    expect(calls).toEqual(['reset', 'exec:echo setup', 'offline:enforce'])
+    expect(at(await res.json(), 'offline')).toBe(true)
   })
 
   it('404s for an unknown session', async () => {
@@ -595,12 +722,29 @@ describe('grading and finishing', () => {
     expect(routes.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
       'GET /api/sessions/:id',
       'POST /api/sessions/:id/hint',
+      'POST /api/sessions/:id/predict',
       'POST /api/sessions/:id/reset',
     ])
 
     for (const r of routes) {
-      const res = await a.request(r.path.replace(':id', id), { method: r.method })
-      expect(res.status).toBeLessThan(400)
+      // `/predict` is the one route here that cannot answer successfully: section
+      // 10.2's ordering guard refuses a prediction once the student has seen a
+      // verdict, and this session was graded on the line above. It is still checked,
+      // because a 409 that named the failing checkpoints would be the same leak with
+      // a different status code.
+      const predict = r.path.endsWith('/predict')
+      const res = await a.request(
+        r.path.replace(':id', id),
+        predict
+          ? {
+              method: 'POST',
+              body: JSON.stringify({ predicted: 'pass' }),
+              headers: { 'content-type': 'application/json' },
+            }
+          : { method: r.method },
+      )
+      if (predict) expect(res.status).toBe(409)
+      else expect(res.status).toBeLessThan(400)
       // The serialised body, not a parsed field: a leak through a nested or
       // renamed key is still a leak.
       const body = await res.text()

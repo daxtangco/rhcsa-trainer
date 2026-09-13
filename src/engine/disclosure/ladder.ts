@@ -1,3 +1,5 @@
+import type { EveryMemberListed } from '../exhaustive.ts'
+
 /**
  * Guided mode is deliberately not a LadderMode: it is full disclosure by
  * construction (spec section 7), so representing a ladder there is meaningless.
@@ -29,18 +31,34 @@ export const MAX_RUNG: Record<LadderMode, Rung> = {
  */
 export const TOP_RUNG: Rung = 5
 
-/** Every rung, in order. Typed here so no caller needs a cast to build it. */
-export const RUNGS: readonly Rung[] = [1, 2, 3, 4, 5]
+/**
+ * Every rung, in order.
+ *
+ * **An ordered tuple with an exhaustiveness assertion, not a `Record<Rung, true>`,
+ * and the asymmetry with `STATUSES` / `SCOPES` / `MODES` is deliberate.** Those
+ * lists answer "is this a member?", and key order means nothing to them. This one
+ * *is a sequence*: `server/app.ts` builds guided mode's full disclosure with
+ * `RUNGS.map((r) => rungContent(r, ctx))`, so the array order is the order the
+ * student reads the ladder in — cold nudge first, narrated solution last. A record's
+ * key order is an implementation detail of its literal, so converting this would
+ * rest the reading order of a hint ladder on object key ordering, a weaker
+ * guarantee than the array already gives. `NEXT_RUNG` below is a record because it
+ * answers a per-rung question and carries no order at all.
+ *
+ * The old `: readonly Rung[]` annotation was the defect, the same one
+ * `readonly string[]` was at the record-shaped sites: it widens every element back
+ * to `Rung`, so nothing tied the contents to the union. A sixth rung typechecked
+ * everywhere — `MAX_RUNG` is keyed by mode, so it would not have noticed either —
+ * while guided mode's `/hint` handed back five rungs out of six with the top of the
+ * ladder missing, silently, in the one mode whose entire contract is full
+ * disclosure. `as const` is what makes the assertion below bite: it is read off
+ * `RUNGS` itself, so a rung dropped from the array is caught as well as one added
+ * to the union, which a hand-written second list beside it could not do.
+ */
+export const RUNGS = [1, 2, 3, 4, 5] as const satisfies readonly Rung[]
 
-// Exhaustive by construction, the same way `vm/config.ts`'s `KINDS` is: adding a
-// Rung fails to typecheck until it is listed here. `RUNGS` itself stays a
-// `readonly Rung[]` rather than converting to `Record<Rung, true>`, unlike
-// `task.ts`'s `TRANSPORTS` and the other three sites this fix round converted —
-// its order is load-bearing at `server/app.ts`, where it builds the disclosure
-// list served to the client, and a record's keys have no ordering contract this
-// project can rely on. So the array carries order and this assertion carries
-// completeness, kept as two things rather than folded into one.
-const _rungsExhaustive: Record<Rung, true> = { 1: true, 2: true, 3: true, 4: true, 5: true }
+/** Unused on purpose: a `Rung` missing from `RUNGS` fails `tsc --noEmit` here. */
+type _EveryRungIsListed = EveryMemberListed<Rung, (typeof RUNGS)[number]>
 
 export interface LadderState {
   mode: LadderMode

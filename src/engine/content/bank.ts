@@ -2,7 +2,7 @@ import type { Dirent } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { ContentError } from './errors.ts'
-import { loadConcept, type ConceptSpec } from './concept.ts'
+import { buildConceptGraph, loadConcept, type ConceptSpec } from './concept.ts'
 import { loadObjectives, type ObjectiveSet } from './objectives.ts'
 import { loadTask, type TaskSpec } from './task.ts'
 
@@ -22,6 +22,28 @@ export interface CoverageReport {
   untaughtConcepts: string[]
   /** Objectives with no exam-objective task. Expected to be non-empty until the bank is complete. */
   uncoveredObjectives: string[]
+  /**
+   * Objectives some task exercises that **no concept card teaches toward**: the
+   * student can be asked to do it and never be told why it works. The other half
+   * of spec section 6.2's safety net — `uncoveredObjectives` catches material
+   * that is never practised, this catches material that is never explained.
+   */
+  objectivesWithoutConcept: string[]
+  /**
+   * Spec section 6.2's assertion, verbatim: objectives the user "has never been
+   * taught, and never demonstrated" — no task of any scope exercises them and no
+   * card teaches toward them. A subset of `uncoveredObjectives` (no task at all
+   * implies no exam-objective task), so it is reported rather than gated on.
+   */
+  untouchedObjectives: string[]
+  /**
+   * Cards no task requires **and** that nothing a task requires needs first.
+   * Stricter than `untaughtConcepts`: a card no task names is still reachable if
+   * it is a transitive prerequisite of one that is, which is how
+   * `selinux.labels-now-vs-policy` reaches a student. Anything left here is
+   * content that exists and can never be delivered by any route.
+   */
+  unreachableConcepts: string[]
 }
 
 function errorMessage(error: unknown): string {
@@ -170,6 +192,15 @@ export function checkCoverage(bank: Bank): CoverageReport {
   const problems: string[] = []
   const referencedConcepts = new Set<string>()
   const coveredObjectives = new Set<string>()
+  /**
+   * Every objective any task exercises, *whatever its scope*, which is
+   * deliberately a looser set than `coveredObjectives`. An instrumental task
+   * cannot confer coverage (spec 6.4) but it absolutely does put the objective
+   * in front of the student, so it is exactly the population that needs a card
+   * to explain it — `selinux/019-httpd-alt-port` drills `pkg.dnf.install` while
+   * being unable to claim it.
+   */
+  const exercisedObjectives = new Set<string>()
 
   for (const task of bank.tasks) {
     for (const cid of task.requiresConcepts) {
@@ -183,32 +214,50 @@ export function checkCoverage(bank: Bank): CoverageReport {
         problems.push(`${task.id} maps to unknown objective: ${oid}`)
         continue
       }
+      exercisedObjectives.add(oid)
       // Instrumental tasks teach an objective through a non-objective service
       // (spec section 6.4), so they must not be able to claim coverage alone.
       if (task.scope === 'exam-objective') coveredObjectives.add(oid)
     }
   }
 
+  const taughtObjectives = new Set<string>()
   for (const concept of bank.concepts) {
     for (const oid of concept.objectives) {
       // Unlike a task's `objectives:` above, a card's must **not** feed
       // `coveredObjectives` — coverage is a property of exam-objective tasks
       // (spec 6.4), a card only teaches toward one. So this validates the
-      // reference and stops; it never adds to the coverage set.
+      // reference and feeds `taughtObjectives`, which is a separate question;
+      // it never adds to the coverage set.
       if (!bank.objectives.byId.has(oid)) {
         problems.push(`${concept.id} maps to unknown objective: ${oid}`)
+        continue
       }
-    }
-    for (const pid of concept.prerequisites) {
-      if (!bank.conceptsById.has(pid)) {
-        problems.push(`${concept.id} lists unknown prerequisite: ${pid}`)
-      }
+      taughtObjectives.add(oid)
     }
   }
+
+  // Rebuilt here rather than carried on `Bank` so that adding the graph could
+  // not change `Bank`'s shape, and so a caller that mutates `bank.concepts`
+  // between load and check gets a report about the bank it actually holds.
+  // Forty cards make the rebuild free.
+  const graph = buildConceptGraph(bank.concepts)
+  // Dangling prerequisites and prerequisite cycles are `problems`, not gaps:
+  // each one is the content lying about itself, so `rhcsa coverage` exits 1 and
+  // `refuseToServe` (src/server/config.ts) refuses to serve the bank at all. A
+  // cycle earns that because it makes `prerequisitesOf` return an order that
+  // claims a card must be studied before itself.
+  problems.push(...graph.problems)
 
   const untaughtConcepts = bank.concepts
     .map((c) => c.id)
     .filter((id) => !referencedConcepts.has(id))
+    .sort()
+
+  const reachable = graph.reachableFrom(referencedConcepts)
+  const unreachableConcepts = bank.concepts
+    .map((c) => c.id)
+    .filter((id) => !reachable.has(id))
     .sort()
 
   const uncoveredObjectives = bank.objectives.objectives
@@ -216,5 +265,22 @@ export function checkCoverage(bank: Bank): CoverageReport {
     .filter((id) => !coveredObjectives.has(id))
     .sort()
 
-  return { problems, untaughtConcepts, uncoveredObjectives }
+  const objectivesWithoutConcept = bank.objectives.objectives
+    .map((o) => o.id)
+    .filter((id) => exercisedObjectives.has(id) && !taughtObjectives.has(id))
+    .sort()
+
+  const untouchedObjectives = bank.objectives.objectives
+    .map((o) => o.id)
+    .filter((id) => !exercisedObjectives.has(id) && !taughtObjectives.has(id))
+    .sort()
+
+  return {
+    problems,
+    untaughtConcepts,
+    uncoveredObjectives,
+    objectivesWithoutConcept,
+    untouchedObjectives,
+    unreachableConcepts,
+  }
 }

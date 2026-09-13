@@ -27,7 +27,14 @@ export type TaskTransport = 'ssh' | 'vmrun'
  * this fix round exists to close. The two unions are deliberately different and
  * this record must follow the narrower one.
  */
-const SCOPES: Record<TaskScope, true> = { 'exam-objective': true, instrumental: true }
+/**
+ * Exported because `src/server/reports.ts` needs the same exhaustiveness for the
+ * dashboard's scope breakdown, and had been keeping a second copy of this literal.
+ * Two lists of the same union is one list that will be wrong: the copy is the one
+ * nobody remembers when a third scope is added, and a scope missing from the
+ * breakdown reads as "not tracked" rather than "none of those".
+ */
+export const SCOPES: Record<TaskScope, true> = { 'exam-objective': true, instrumental: true }
 const WEIGHTS: Record<TaskWeight, true> = { low: true, medium: true, high: true }
 const TRANSPORTS: Record<TaskTransport, true> = { ssh: true, vmrun: true }
 

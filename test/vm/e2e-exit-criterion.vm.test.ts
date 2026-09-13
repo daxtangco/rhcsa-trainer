@@ -1,7 +1,11 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { loadBank } from '../../src/engine/content/bank.ts'
+import { loadCorpus } from '../../src/engine/corpus/corpus.ts'
+import { AttemptStore } from '../../src/engine/store/attempts.ts'
+import { MEMORY_DB, openHistoryDb } from '../../src/engine/store/schema.ts'
+import { VmStateStore } from '../../src/engine/store/vm-state.ts'
 import { loadTaskScripts } from '../../src/engine/validate/harness.ts'
 import { chooseTransport } from '../../src/engine/vm/select.ts'
 import { loadVmConfig } from '../../src/engine/vm/config.ts'
@@ -12,6 +16,9 @@ import type { LabRuntime } from '../../src/server/lab.ts'
 import { SessionStore } from '../../src/server/session.ts'
 
 const TASK_ID = 'storage/014-grow-home-lv'
+/** Any other task in the bank, used only as a name to make vm_state disagree. */
+const OTHER_TASK_ID = 'selinux/019-httpd-alt-port'
+const CORPUS = process.env.RHCSA_CORPUS ?? 'corpus'
 const CONTENT = process.env.RHCSA_CONTENT ?? 'content'
 const SNAPSHOT = process.env.RHCSA_SNAPSHOT ?? 'clean'
 
@@ -88,6 +95,17 @@ async function buildApp() {
     await rebooted()
     await waitForSsh(runtime)
   }
+  // The three optional deps, all wired. They were omitted here originally, and
+  // `AppDeps.corpus`'s own comment names this file as the reason it is optional —
+  // which meant the one test that exercises the real guest ran against an app with
+  // no attempt history, no vm_state row and a corpus-less guided mode that answered
+  // 500. Every route below that reads them was therefore certified only against
+  // fakes. In-memory database: this is a fresh app per run and nothing here is
+  // history worth keeping.
+  const db = openHistoryDb({ path: MEMORY_DB })
+  const attempts = new AttemptStore(db, { now: () => Date.now() })
+  const vmState = new VmStateStore(db, { now: () => Date.now() })
+  const corpus = await loadCorpus(CORPUS)
   const app = createApp({
     bank,
     runtime,
@@ -95,8 +113,11 @@ async function buildApp() {
     assertLib,
     loadScripts: loadTaskScripts,
     now: () => Date.now(),
+    attempts,
+    vmState,
+    corpus,
   })
-  return { app, bank, assertLib, runtime, transportKind: transport.kind }
+  return { app, bank, assertLib, runtime, transportKind: transport.kind, vmState, db }
 }
 
 type App = Awaited<ReturnType<typeof buildApp>>['app']
@@ -117,6 +138,29 @@ async function post(app: App, path: string, body?: unknown): Promise<Record<stri
   return obj(parsed, `POST ${path} response`)
 }
 
+/** As `post`, but keeps the status: two of the assertions below are about a 409. */
+async function send(
+  app: App,
+  method: 'GET' | 'POST',
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await app.request(
+    path,
+    method === 'GET'
+      ? undefined
+      : { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) },
+  )
+  const text = await res.text()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error(`${method} ${path}: status ${res.status}, body was not JSON: ${text.slice(0, 200)}`)
+  }
+  return { status: res.status, body: obj(parsed, `${method} ${path} response`) }
+}
+
 describe('phase 1 exit criterion', () => {
   let ctx: Awaited<ReturnType<typeof buildApp>>
 
@@ -126,6 +170,10 @@ describe('phase 1 exit criterion', () => {
     // below reverts a snapshot and immediately runs setup.sh over the transport.
     await waitForSsh(ctx.runtime)
   }, 120_000)
+
+  afterAll(() => {
+    ctx?.db.close()
+  })
 
   it(
     'teaches the concept, grades the solution and survives the reboot',
@@ -138,6 +186,42 @@ describe('phase 1 exit criterion', () => {
       const id = str(started.id, 'session id')
       expect(started.checkpointTotal).toBe(5)
       expect(str(started.prompt, 'task prompt')).toMatch(/12/)
+
+      // --- the guest bookkeeping the grade route gates on -----------------
+      // `applySetup` writes vm_state after the revert and setup.sh both land, and
+      // the grade route below refuses on any disagreement. Read back through
+      // /api/overview rather than off the store, so the read model that the
+      // dashboard shows is the thing certified against a real revert: the snapshot
+      // name here comes from the hypervisor's config, not from a fixture.
+      const overview = await send(app, 'GET', '/api/overview')
+      expect(overview.status).toBe(200)
+      expect(obj(overview.body.vm, 'overview vm row')).toMatchObject({
+        currentTask: TASK_ID,
+        snapshot: SNAPSHOT,
+      })
+      expect(ctx.vmState.staleFor(TASK_ID)).toBeUndefined()
+
+      // --- guided mode has book material for this task --------------------
+      // Absent a corpus these two answer 500, which is what they did here before.
+      // An empty `items` array is a 200 as well, so assert content: every item comes
+      // from the LVM chapter this task's objective resolves to, and the first one
+      // carries real steps out of the book rather than an empty shell.
+      const guided = await send(app, 'GET', `/api/guided/task/${TASK_ID}`)
+      expect(guided.status).toBe(200)
+      const guidedItems = guided.body.items
+      if (!Array.isArray(guidedItems)) {
+        throw new Error(`guided items: expected an array, got ${JSON.stringify(guidedItems)}`)
+      }
+      expect(guidedItems.length).toBeGreaterThan(0)
+      for (const item of guidedItems) {
+        expect(str(obj(item, 'guided item').id, 'guided item id')).toMatch(/^(Lab|Exercise) 15/)
+      }
+      const shown = obj(obj(guidedItems[0], 'first guided item').shown, 'shown edition text')
+      expect(Array.isArray(shown.steps) && shown.steps.length).toBeGreaterThan(0)
+
+      const byObjective = await send(app, 'GET', '/api/guided/objective/storage.lvm.resize')
+      expect(byObjective.status).toBe(200)
+      expect(Array.isArray(byObjective.body.items) && byObjective.body.items.length).toBeGreaterThan(0)
 
       // --- "learned the concept from a concept card" ----------------------
       // Rung 2 names the objective and the cards but must not contain the
@@ -221,6 +305,46 @@ describe('phase 1 exit criterion', () => {
       }
       expect(revealed).toHaveLength(5)
       expect(revealed.map((c) => obj(c, 'revealed checkpoint').id)).toContain('fs-home-size')
+
+      // --- and the attempt is on disk, from a real grader run -------------
+      // The only place the write path meets a verdict the guest actually produced.
+      // `clean` is a generated column with the stale-state guard behind it and the
+      // rating is refused outright on a drifted row, so "total 1, clean 1" is the
+      // statement that a genuine 5-of-5 with a real reboot satisfies every CHECK in
+      // the schema — which no fixture can establish.
+      const after = await send(app, 'GET', '/api/overview')
+      expect(after.body.attempts).toMatchObject({ total: 1, clean: 1, byMode: { practice: 1 } })
+    },
+    E2E_TIMEOUT,
+  )
+
+  it(
+    'refuses to grade against a guest carrying another task\'s setup',
+    async () => {
+      const { app } = ctx
+
+      // The stale-state guard, on the VM path, against the real store. The row is
+      // moved by hand rather than by opening a session for the other task: that
+      // would revert the guest and run a second setup.sh, spending a minute of real
+      // boot to arrive at a state this one line describes exactly. What is being
+      // measured is the route's response to the bookkeeping, and the bookkeeping is
+      // the store's row.
+      const started = await post(app, '/api/sessions', { taskId: TASK_ID, mode: 'practice' })
+      const id = str(started.id, 'session id')
+      ctx.vmState.applied(OTHER_TASK_ID, SNAPSHOT)
+
+      const refused = await send(app, 'POST', `/api/sessions/${id}/grade`)
+      expect(refused.status).toBe(409)
+      expect(str(refused.body.error, 'stale error')).toContain(OTHER_TASK_ID)
+      expect(obj(refused.body.staleState, 'staleState')).toMatchObject({
+        requestedTask: TASK_ID,
+        liveTask: OTHER_TASK_ID,
+      })
+
+      // And the refusal recorded nothing: a 409 that still wrote an attempt would
+      // feed the scheduler a grade nobody earned.
+      const overview = await send(app, 'GET', '/api/overview')
+      expect(overview.body.attempts).toMatchObject({ total: 1 })
     },
     E2E_TIMEOUT,
   )

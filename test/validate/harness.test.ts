@@ -130,6 +130,98 @@ describe('validateTask', () => {
     }
   })
 
+  it('reports a post-reboot run that never happened as one failure, not a page of them', async () => {
+    // The `storage/014-grow-home-lv` shape, reduced: the fixture's own change
+    // breaks the ssh key the grader arrives on (authorized_keys lives on
+    // rhel/home, which the fixture un-persists), while `waitForGuest` polls over
+    // vmrun and reports the guest up regardless.
+    //
+    // The property under test is the *absence* of the derived complaints. Every
+    // checkpoint verdict B never emitted is filled in as a fail, so without this
+    // the run accuses three checkpoints of "expected pass, got fail" and points
+    // the reader at a grader that is fine.
+    const w = world()
+    const bad = deps(w)
+    bad.transport = new FakeTransport((script) => {
+      if (!script.includes('GRADE')) return w.handler(script)
+      if (w.state.rebooted) {
+        return {
+          stdout: '',
+          stderr: 'student@192.168.70.130: Permission denied (publickey).',
+          code: 255,
+        }
+      }
+      return w.handler(script)
+    })
+
+    const results = await validateTask(task(), scripts(), bad)
+    const sol = results.find((r) => r.name === '01-lvextend.sh')
+    expect(sol?.ok).toBe(false)
+    expect(sol?.failures).toHaveLength(1)
+    expect(sol?.failures[0]).toMatch(/post-reboot grading did not run/)
+    expect(sol?.failures[0]).toContain('Permission denied (publickey)')
+
+    const text = sol?.failures.join('\n') ?? ''
+    expect(text).not.toMatch(/verdict B/)
+    expect(text).not.toMatch(/expected pass, got fail/)
+    expect(text).not.toMatch(/reboot failed/)
+    expect(text).not.toMatch(/no checkpoint passed before the reboot/)
+  })
+
+  it('measures the fixture over the fallback channel and says so in notes, not failures', async () => {
+    // The same broken world as above, with `deps.fallback` supplied — the shape
+    // `rhcsa validate` now runs in. Both fixtures below are honest results that
+    // the previous test could only report as infrastructure failures.
+    const w = world()
+    const base = deps(w)
+    const brokenAfterReboot = (script: string) => {
+      if (!script.includes('GRADE') || !w.state.rebooted) return w.handler(script)
+      return {
+        stdout: '',
+        stderr: 'student@192.168.70.130: Permission denied (publickey).',
+        code: 255,
+      }
+    }
+    const withFallback = {
+      ...base,
+      transport: new FakeTransport(brokenAfterReboot, { kind: 'ssh' }),
+      // Reaches the same world, and that is the point: vmrun goes through
+      // open-vm-tools, so it answers the persistence question on the very machine
+      // whose ssh key auth the fixture destroyed.
+      fallback: new FakeTransport(w.handler, { kind: 'vmrun' }),
+    }
+
+    const results = await validateTask(task(), scripts(), withFallback)
+
+    // The whole task validates, including the anti-solution whose `@post`
+    // declaration was previously unverifiable.
+    for (const r of results) {
+      expect(r.failures, `${r.name}: ${r.failures.join('; ')}`).toEqual([])
+      expect(r.ok).toBe(true)
+    }
+
+    // Green, and not silently so: every fixture that rebooted and lost the channel
+    // carries the note, which here is all four. `no-action` included, and that is
+    // correct rather than sloppy — this world's baseline leaves /var still mounted,
+    // so `var-from-lv` passes in verdict A, so `grade()` does reboot. A fixture
+    // only skips the reboot when *nothing* passed.
+    const noted = results.filter((r) => (r.notes ?? []).length > 0).map((r) => r.name)
+    expect(noted).toEqual([
+      'no-action',
+      '01-lvextend.sh',
+      '02-mount-unit.sh',
+      '01-forgot-persistence.sh',
+    ])
+    const note = results.find((r) => r.name === '01-lvextend.sh')?.notes?.[0] ?? ''
+    expect(note).toContain('fell back to the vmrun transport')
+    expect(note).toContain('verdict B is over vmrun, verdict A over ssh')
+
+    // `ok` is derived from `failures`, so a note must never reach that array: a
+    // note that turned a validate run red would make the honest report the
+    // expensive one, and the next person would delete the note.
+    expect(results.every((r) => r.ok)).toBe(true)
+  })
+
   it('fails the no-action fixture when a goal checkpoint passes without work', async () => {
     const w = world()
     // A grader that reports a pass on an untouched system is the dangerous

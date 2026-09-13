@@ -7,7 +7,7 @@ import { loadTaskScripts } from '../engine/validate/harness.ts'
 import { validateBank } from '../engine/validate/run.ts'
 import { loadVmConfig } from '../engine/vm/config.ts'
 import { chooseTransport } from '../engine/vm/select.ts'
-import { VmController } from '../engine/vm/vmrun.ts'
+import { VmController, VmrunTransport } from '../engine/vm/vmrun.ts'
 import { lintContent } from './lint.ts'
 
 export interface CliIo {
@@ -90,10 +90,21 @@ async function coverage(argv: string[], io: CliIo): Promise<number> {
   io.out(`tasks: ${bank.tasks.length}`)
   io.out(`concepts: ${bank.concepts.length}`)
   io.out(`objectives: ${bank.objectives.objectives.length}`)
+  // Five gap lists, each printed in full. The two original headings are kept
+  // byte-identical because this output is pasted verbatim into
+  // docs/coverage-phase-1.md and a reader diffing two generations of that file
+  // should see content moving, not headings being reworded. What each list
+  // means is on `CoverageReport`.
   io.out(`uncovered objectives: ${report.uncoveredObjectives.length}`)
   for (const id of report.uncoveredObjectives) io.out(`  - ${id}`)
+  io.out(`objectives with no concept card: ${report.objectivesWithoutConcept.length}`)
+  for (const id of report.objectivesWithoutConcept) io.out(`  - ${id}`)
+  io.out(`objectives never taught and never demonstrated: ${report.untouchedObjectives.length}`)
+  for (const id of report.untouchedObjectives) io.out(`  - ${id}`)
   io.out(`untaught concepts: ${report.untaughtConcepts.length}`)
   for (const id of report.untaughtConcepts) io.out(`  - ${id}`)
+  io.out(`unreachable concepts: ${report.unreachableConcepts.length}`)
+  for (const id of report.unreachableConcepts) io.out(`  - ${id}`)
 
   if (report.problems.length > 0) {
     for (const p of report.problems) io.err(`problem: ${p}`)
@@ -101,11 +112,21 @@ async function coverage(argv: string[], io: CliIo): Promise<number> {
   }
 
   if (strict) {
-    const gaps = report.uncoveredObjectives.length + report.untaughtConcepts.length
+    // `untouchedObjectives` is deliberately absent from the tally: an objective
+    // with no task at all also has no exam-objective task, so it is already
+    // counted by `uncoveredObjectives` and adding it would inflate the gate
+    // rather than tighten it.
+    const gaps =
+      report.uncoveredObjectives.length +
+      report.objectivesWithoutConcept.length +
+      report.untaughtConcepts.length +
+      report.unreachableConcepts.length
     if (gaps > 0) {
       io.err(
         `${report.uncoveredObjectives.length} uncovered objective(s), ` +
-          `${report.untaughtConcepts.length} untaught concept(s)`,
+          `${report.objectivesWithoutConcept.length} objective(s) with no concept card, ` +
+          `${report.untaughtConcepts.length} untaught concept(s), ` +
+          `${report.unreachableConcepts.length} unreachable concept(s)`,
       )
       return 1
     }
@@ -227,6 +248,47 @@ function parseValidateArgs(argv: string[]): ValidateOptions | undefined {
   return { root, snapshot, taskIds }
 }
 
+/**
+ * The stderr lines warning that this run is not measuring what the tasks asked
+ * for, or `[]` when it is.
+ *
+ * `transport: vmrun` is honoured as a hard requirement by `validate` below;
+ * `transport: ssh` is not, because it is also the default and `chooseTransport`'s
+ * whole point is to fall back to vmrun when ssh cannot reach the guest — usable,
+ * slow, and better than refusing to run. What was missing is that the fallback
+ * changes what the run *measures*, and nothing said so.
+ *
+ * Measured 2026-09-13, and this is why the function exists.
+ * `storage/014-grow-home-lv` failed two verdict-B checkpoints over ssh and then
+ * passed 6/6 over vmrun with no content change between the two runs. Its
+ * `antisolutions/02-removed-persistence.sh` comments `/home` out of fstab, which
+ * takes `/home/student/.ssh/authorized_keys` with it — so ssh key auth dies and
+ * the post-reboot grade never executes. Over vmrun the grader goes through
+ * `vmtoolsd` and never authenticates, so that failure mode cannot occur. The
+ * clean run is a real result about the content and is *not* a result about the
+ * path the student will be graded on. Read as the latter it retires a live bug.
+ *
+ * Pure and exported so it can be tested: `validate` itself reaches a real
+ * hypervisor three lines in.
+ */
+export function transportMismatchWarning(
+  tasks: ReadonlyArray<{ id: string; transport: string }>,
+  chosen: string,
+): string[] {
+  const mismatched = tasks.filter((t) => t.transport !== chosen)
+  if (mismatched.length === 0) return []
+  // Every mismatched task is named, not just counted. The count alone cannot be
+  // acted on: the reader's next move is to split the run, and that needs the ids.
+  const declared = [...new Set(mismatched.map((t) => t.transport))].sort()
+  return [
+    `warning: ${mismatched.length} of ${tasks.length} task(s) declare a transport this run` +
+      ` is not using. A pass here does not certify the transport they are graded on.` +
+      ` To insist instead of falling back, set RHCSA_TRANSPORT=${declared[0]} — which` +
+      ' fails loudly when that transport is unreachable.',
+    ...mismatched.map((t) => `  ${t.id} declares ${t.transport}, running over ${chosen}`),
+  ]
+}
+
 async function validate(argv: string[], io: CliIo): Promise<number> {
   const options = parseValidateArgs(argv)
   if (options === undefined) {
@@ -269,25 +331,54 @@ async function validate(argv: string[], io: CliIo): Promise<number> {
   const transport = await chooseTransport(cfg, require ? { require } : {})
   io.out(`transport: ${transport.kind}`)
 
+  for (const line of transportMismatchWarning(tasks, transport.kind)) io.err(line)
+
   const assertLib = await readFile(join(root, 'lib', 'assert.sh'), 'utf8')
+
+  // The post-reboot fallback channel (see `GradeOptions.fallback`). vmrun is free
+  // to construct — it shells out per call and holds nothing open — and it is the
+  // right way round: it survives exactly the fixtures that break ssh, and never
+  // the other way. When the run is already over vmrun, `grade()`'s `kind` guard
+  // makes this inert rather than a second identical attempt.
+  const fallback = new VmrunTransport(cfg)
 
   const summary = await validateBank({
     tasks,
     assertLib,
     deps: {
       transport,
+      fallback,
       // Every fixture starts from the same known machine. This is the whole
       // reason the clean snapshot is captured live.
       reset: () => controller.revert(snapshot),
       reboot: () => controller.reboot(),
     },
     loadScripts: loadTaskScripts,
-    onTask: (id) => io.out(`\n${id}`),
+    // Progress, on stderr, deliberately not the report's heading. `validateBank`
+    // returns only when the whole run is finished, so an `onTask` writing to
+    // stdout printed *every* task's heading before *any* task's result. On a
+    // one-task run that is invisible; on a twelve-task run it left seventy
+    // `ok  solution/01-…` lines under a stack of headings, with nothing saying
+    // which task each line belonged to — and two tasks owning a `01-` of the
+    // same name is the normal case, not a corner one. The headings below come
+    // from the results themselves, so they cannot drift out of order.
+    onTask: (id) => io.err(`running ${id}`),
   })
 
+  let heading: string | undefined
   for (const r of summary.results) {
+    if (r.taskId !== heading) {
+      // Same text `onTask` used to emit, so a single-task run's stdout is
+      // unchanged byte for byte and anything that recorded that output stays
+      // accurate.
+      io.out(`\n${r.taskId}`)
+      heading = r.taskId
+    }
     io.out(`  ${r.ok ? 'ok  ' : 'FAIL'} ${r.kind}/${r.name}`)
     for (const f of r.failures) io.out(`         ${f}`)
+    // Printed on a passing fixture too, which is the only case that matters: a
+    // failing one already has the reader's attention.
+    for (const n of r.notes ?? []) io.out(`         note: ${n}`)
   }
 
   io.out(

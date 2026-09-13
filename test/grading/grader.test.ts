@@ -137,6 +137,286 @@ describe('grade', () => {
     expect(r.verdictA.checkpoints).toHaveLength(2)
   })
 
+  // --- The post-reboot run that never ran. ---
+  //
+  // Measured, not hypothetical: `storage/014-grow-home-lv`'s
+  // `antisolutions/02-removed-persistence.sh` comments /home out of fstab, and
+  // /home/student/.ssh/authorized_keys lives on rhel/home. `waitForGuest` polls
+  // over vmrun, so it reports the guest up while ssh key auth has nothing to read.
+  // The old code discarded runB's code and stderr, so this arrived as two
+  // checkpoints accused of "the grader likely stopped before reaching it" - a
+  // guess about content, produced by a broken control channel.
+  const SSH_DENIED = 'student@192.168.70.130: Permission denied (publickey).'
+
+  /** A transport whose first exec is verdict A and whose second is the caller's. */
+  function twoRuns(second: () => { stdout: string; stderr: string; code: number }) {
+    const t: FakeTransport = new FakeTransport(() =>
+      t.calls.length === 1 ? { stdout: PASS_PASS, stderr: '', code: 0 } : second(),
+    )
+    return t
+  }
+
+  it('names a post-reboot run that never executed instead of blaming the grader', async () => {
+    const t = twoRuns(() => ({ stdout: '', stderr: SSH_DENIED, code: 255 }))
+    const r = await grade({
+      task: task(),
+      transport: t,
+      gradeScript: 'grade',
+      reboot: async () => {},
+    })
+
+    expect(r.rebooted).toBe(true)
+    // The guest came back. Saying otherwise would send the reader to debug a
+    // boot that worked.
+    expect(r.rebootError).toBeUndefined()
+    expect(r.postRebootError).toMatch(/never executed \(the transport exited 255/)
+    expect(r.postRebootError).toContain('Permission denied (publickey)')
+
+    // Unverified is still fail - only the sentence changes.
+    expect(r.verdictB?.checkpoints.map((cp) => cp.status)).toEqual(['fail', 'fail'])
+    for (const cp of r.verdictB?.checkpoints ?? []) {
+      expect(cp.detail).toBe(r.postRebootError)
+      expect(cp.detail).not.toMatch(/stopped before reaching it/)
+    }
+    expect(r.regressions.map((c) => c.id)).toEqual(['lv-var-size', 'var-from-lv'])
+  })
+
+  it('still blames the grader when the second run stopped partway', async () => {
+    // One checkpoint out, then died: this is the `set -e` case the old wording
+    // was written for, and it must keep that wording.
+    const t = twoRuns(() => ({
+      stdout: '{"id":"lv-var-size","desc":"var LV >= 6G","status":"pass"}',
+      stderr: 'grade.sh: line 40: lvs: command not found',
+      code: 127,
+    }))
+    const r = await grade({
+      task: task(),
+      transport: t,
+      gradeScript: 'grade',
+      reboot: async () => {},
+    })
+
+    expect(r.postRebootError).toBeUndefined()
+    expect(r.verdictB?.checkpoints.map((cp) => cp.id)).toEqual(['lv-var-size', 'var-from-lv'])
+    expect(r.verdictB?.checkpoints[1]?.detail).toMatch(/stopped before reaching it/)
+  })
+
+  it('does not read a normal non-zero grader exit as a transport failure', async () => {
+    // A grader that reports a failure ends non-zero by design (section 6.5 rule
+    // 3). Reading that as "the run never happened" would relabel every honest
+    // persistence failure in the bank as infrastructure.
+    const t = twoRuns(() => ({ stdout: PASS_FAIL, stderr: 'lvs: warning', code: 1 }))
+    const r = await grade({
+      task: task(),
+      transport: t,
+      gradeScript: 'grade',
+      reboot: async () => {},
+    })
+
+    expect(r.postRebootError).toBeUndefined()
+    expect(r.regressions.map((c) => c.id)).toEqual(['var-from-lv'])
+  })
+
+  it('keeps calling an empty second run with exit 0 a grader problem', async () => {
+    // Both halves of the condition are load-bearing. Silence with a clean exit is
+    // a grader that emitted nothing, which is a content bug and must keep saying so.
+    const t = twoRuns(() => ({ stdout: '', stderr: '', code: 0 }))
+    const r = await grade({
+      task: task(),
+      transport: t,
+      gradeScript: 'grade',
+      reboot: async () => {},
+    })
+
+    expect(r.postRebootError).toBeUndefined()
+    expect(r.verdictB?.checkpoints[0]?.detail).toMatch(/stopped before reaching it/)
+  })
+
+  it('bounds the stderr it quotes, and says so when there is none', async () => {
+    const flood = twoRuns(() => ({ stdout: '', stderr: 'x'.repeat(5000), code: 255 }))
+    const r = await grade({
+      task: task(),
+      transport: flood,
+      gradeScript: 'grade',
+      reboot: async () => {},
+    })
+    expect(r.postRebootError?.length).toBeLessThan(500)
+    expect(r.postRebootError).toMatch(/…$/)
+
+    const silent = twoRuns(() => ({ stdout: '', stderr: '   \n', code: 255 }))
+    const r2 = await grade({
+      task: task(),
+      transport: silent,
+      gradeScript: 'grade',
+      reboot: async () => {},
+    })
+    expect(r2.postRebootError).toMatch(/said nothing on stderr$/)
+  })
+
+  // --- The post-reboot fallback channel. ---
+  //
+  // Same measured case as the block above, one step further on. `SSH_DENIED` is
+  // not a flake and not a broken lab: `02-removed-persistence.sh` un-persists
+  // /home, /home/student/.ssh/authorized_keys is on rhel/home, and the
+  // persistence question — did /home come back mounted from the LV? — is still
+  // perfectly answerable, just not over ssh. vmrun goes through open-vm-tools and
+  // never authenticates, so `GradeOptions.fallback` lets verdict B be measured
+  // instead of abandoned. What these tests hold in place is how *narrow* that is.
+
+  /** As `twoRuns`, but labelled ssh so the fallback's `kind` guard is reachable. */
+  function overSsh(second: () => { stdout: string; stderr: string; code: number }) {
+    const t: FakeTransport = new FakeTransport(
+      () => (t.calls.length === 1 ? { stdout: PASS_PASS, stderr: '', code: 0 } : second()),
+      { kind: 'ssh' },
+    )
+    return t
+  }
+
+  function overVmrun(handler: () => { stdout: string; stderr: string; code: number }) {
+    return new FakeTransport(handler, { kind: 'vmrun' })
+  }
+
+  it('measures verdict B over the fallback when the chosen channel did not survive', async () => {
+    const primary = overSsh(() => ({ stdout: '', stderr: SSH_DENIED, code: 255 }))
+    const fallback = overVmrun(() => ({ stdout: PASS_FAIL, stderr: '', code: 1 }))
+
+    const r = await grade({
+      task: task(),
+      transport: primary,
+      gradeScript: 'grade',
+      reboot: async () => {},
+      fallback,
+    })
+
+    // The whole point: a real persistence answer where there was none.
+    expect(r.postRebootError).toBeUndefined()
+    expect(r.verdictB?.checkpoints.map((cp) => `${cp.id}:${cp.status}`)).toEqual([
+      'lv-var-size:pass',
+      'var-from-lv:fail',
+    ])
+    // And the regression is derived from the fallback's verdict, not fabricated:
+    // one id regressed, not both, which is exactly what the un-persisted fixture
+    // should show and what the abandoned-verdict path could never distinguish.
+    expect(r.regressions.map((c) => c.id)).toEqual(['var-from-lv'])
+    // Never silent. A pass over a channel the caller did not choose is a different
+    // claim from a pass over the one it did.
+    expect(r.verdictBVia).toBe('vmrun')
+    expect(primary.calls).toHaveLength(2)
+    expect(fallback.calls).toHaveLength(1)
+  })
+
+  it('leaves the fallback untouched when the chosen channel worked', async () => {
+    // The condition is "produced no checkpoints at all", not "reported a failure".
+    // A grader that emitted even one checkpoint ran, and re-running it elsewhere
+    // would mean two disagreeing measurements of a single reboot.
+    const primary = overSsh(() => ({ stdout: PASS_FAIL, stderr: '', code: 1 }))
+    const fallback = overVmrun(() => ({ stdout: PASS_PASS, stderr: '', code: 0 }))
+
+    const r = await grade({
+      task: task(),
+      transport: primary,
+      gradeScript: 'grade',
+      reboot: async () => {},
+      fallback,
+    })
+
+    expect(fallback.calls).toEqual([])
+    expect(r.verdictBVia).toBeUndefined()
+    expect(r.regressions.map((c) => c.id)).toEqual(['var-from-lv'])
+  })
+
+  it('never reaches for the fallback on verdict A', async () => {
+    // Verdict B only. If the *first* run cannot reach the guest, nothing has been
+    // established about the machine, and switching channels there would hide a
+    // broken lab setup behind a grade. `grade()` gets that for free by returning
+    // before the reboot when nothing passed — this pins that it stays free.
+    const primary = new FakeTransport(() => ({ stdout: '', stderr: SSH_DENIED, code: 255 }), {
+      kind: 'ssh',
+    })
+    const fallback = overVmrun(() => ({ stdout: PASS_PASS, stderr: '', code: 0 }))
+    const reboot = vi.fn(async () => {})
+
+    const r = await grade({ task: task(), transport: primary, gradeScript: 'grade', reboot, fallback })
+
+    expect(fallback.calls).toEqual([])
+    expect(reboot).not.toHaveBeenCalled()
+    expect(r.rebooted).toBe(false)
+    expect(r.verdictB).toBeUndefined()
+    expect(r.verdictBVia).toBeUndefined()
+  })
+
+  it('does not re-run an identical failure when the fallback is the same kind', async () => {
+    // Easy to trip: both transports usually come out of one config object, and a
+    // run already on vmrun would otherwise fail, retry over vmrun, fail the same
+    // way, and report the second failure as though it were new information.
+    const primary = overSsh(() => ({ stdout: '', stderr: SSH_DENIED, code: 255 }))
+    const sameKind = new FakeTransport(() => ({ stdout: PASS_PASS, stderr: '', code: 0 }), {
+      kind: 'ssh',
+    })
+
+    const r = await grade({
+      task: task(),
+      transport: primary,
+      gradeScript: 'grade',
+      reboot: async () => {},
+      fallback: sameKind,
+    })
+
+    expect(sameKind.calls).toEqual([])
+    expect(r.verdictBVia).toBeUndefined()
+    expect(r.postRebootError).toContain('Permission denied (publickey)')
+  })
+
+  it('names both channels when the fallback fails too, and keeps the first as the headline', async () => {
+    const primary = overSsh(() => ({ stdout: '', stderr: SSH_DENIED, code: 255 }))
+    const fallback = overVmrun(() => ({ stdout: '', stderr: 'vmrun: guest tools are not running', code: 4 }))
+
+    const r = await grade({
+      task: task(),
+      transport: primary,
+      gradeScript: 'grade',
+      reboot: async () => {},
+      fallback,
+    })
+
+    expect(r.verdictBVia).toBeUndefined()
+    // The chosen channel's own stderr, still first: it is the failure the reader
+    // asked about. The fallback's is a parenthetical so nobody debugs a channel
+    // they never selected.
+    expect(r.postRebootError).toMatch(/exited 255.*Permission denied/)
+    expect(r.postRebootError).toContain('the vmrun fallback was tried and also produced no checkpoints, exiting 4')
+    expect(r.postRebootError).not.toContain('guest tools are not running')
+    // And the verdict is still fully downgraded — a fallback that failed changes
+    // nothing about what was verified.
+    expect(r.verdictB?.checkpoints.map((cp) => cp.status)).toEqual(['fail', 'fail'])
+  })
+
+  it('keeps the first diagnosis when the fallback throws rather than exiting', async () => {
+    // `LabTransport.exec` promises not to throw on a non-zero *exit*, not that it
+    // cannot throw at all: a missing vmrun.exe or an unresolvable .vmx surfaces
+    // here. Losing the real diagnosis to that would be a strictly worse report
+    // than not having a fallback at all.
+    const primary = overSsh(() => ({ stdout: '', stderr: SSH_DENIED, code: 255 }))
+    const fallback = new FakeTransport(
+      () => {
+        throw new Error('ENOENT: vmrun.exe')
+      },
+      { kind: 'vmrun' },
+    )
+
+    const r = await grade({
+      task: task(),
+      transport: primary,
+      gradeScript: 'grade',
+      reboot: async () => {},
+      fallback,
+    })
+
+    expect(r.postRebootError).toContain('Permission denied (publickey)')
+    expect(r.postRebootError).toContain('exiting -1')
+    expect(r.verdictBVia).toBeUndefined()
+  })
+
   it('ignores the grader exit code', async () => {
     // Spec section 6.5 rule 3: one failing check must not abort the rest, so a
     // non-zero exit is normal and must not be treated as an error.

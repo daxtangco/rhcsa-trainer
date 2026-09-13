@@ -1,4 +1,5 @@
 import { ContentError } from '../content/errors.ts'
+import type { EveryMemberListed } from '../exhaustive.ts'
 
 export type ExpectPhase = 'pre' | 'post' | 'both'
 
@@ -7,15 +8,27 @@ export interface ExpectedFailure {
   phase: ExpectPhase
 }
 
-const PHASES: readonly ExpectPhase[] = ['pre', 'post', 'both']
+/**
+ * The accepted `@phase` suffixes, as an ordered tuple with an exhaustiveness
+ * assertion rather than the `Record<ExpectPhase, true>` shape used by
+ * `content/task.ts` and `grading/verdict.ts` — see `../exhaustive.ts` for the two
+ * shapes and when each applies.
+ *
+ * The ordering claim here is weaker than `RUNGS`': nothing computes with the
+ * sequence. What it does carry is the **prose order of the error message below**,
+ * which reads the list rather than repeating it, so a phase added to the union
+ * appears in what a content author is told for free. That is the half of the defect
+ * that survived the type: `readonly ExpectPhase[]` cannot be checked against the
+ * union it enumerates, so a fourth phase would have compiled everywhere while
+ * `isPhase` rejected every header declaring it and the message named the old three.
+ * An anti-solution's `# expect-fail:` is how the harness knows a grader fails at the
+ * right moment, so a phase silently rejected there is a grader nobody can declare
+ * correctly.
+ */
+const PHASES = ['pre', 'post', 'both'] as const satisfies readonly ExpectPhase[]
 
-// Exhaustive by construction, the same way `ladder.ts`'s `RUNGS` is: adding an
-// ExpectPhase fails to typecheck until it is listed here. Unlike `RUNGS`,
-// `PHASES`' own order carries no meaning — `isPhase` only ever tests membership
-// via `.some()` — so the reason it stays a `readonly ExpectPhase[]` rather than
-// converting to `Record<ExpectPhase, true>`, unlike the four sites this fix round
-// did convert, is consistency with `RUNGS` rather than an ordering need of its own.
-const _phasesExhaustive: Record<ExpectPhase, true> = { pre: true, post: true, both: true }
+/** Unused on purpose: an `ExpectPhase` missing from `PHASES` fails `tsc --noEmit` here. */
+type _EveryPhaseIsListed = EveryMemberListed<ExpectPhase, (typeof PHASES)[number]>
 
 function isPhase(v: string): v is ExpectPhase {
   return PHASES.some((p) => p === v)
@@ -83,7 +96,8 @@ export function parseExpectations(
 
     const phase = phaseRaw === undefined ? 'both' : phaseRaw.trim()
     if (!isPhase(phase)) {
-      problems.push(`unknown phase "${phase}" for ${trimmedId} (use pre, post or both)`)
+      // Read off `PHASES`, not repeated: the list and the advice cannot disagree.
+      problems.push(`unknown phase "${phase}" for ${trimmedId} (use one of: ${PHASES.join(', ')})`)
       continue
     }
 

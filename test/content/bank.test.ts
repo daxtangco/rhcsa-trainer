@@ -107,6 +107,85 @@ describe('checkCoverage', () => {
     )
   })
 
+  it('treats a prerequisite cycle as a hard problem, not a gap', async () => {
+    // A cycle makes `prerequisitesOf` claim a card must be studied before
+    // itself, so it is content lying about itself in the same way a dangling
+    // reference is: `problems`, which fails `coverage --strict` and
+    // `refuseToServe`, not a gap list that gets logged and served anyway.
+    const bank = await loadBank(BANK)
+    const a = bank.conceptsById.get('storage.lvm-abstraction-stack')
+    const b = bank.conceptsById.get('storage.orphan-concept')
+    if (!a || !b) throw new Error('fixture missing')
+    a.prerequisites = ['storage.orphan-concept']
+    b.prerequisites = ['storage.lvm-abstraction-stack']
+
+    const report = checkCoverage(bank)
+    expect(report.problems.join('\n')).toMatch(/prerequisite cycle: /)
+  })
+
+  it('lists objectives a task exercises that no concept card teaches toward', async () => {
+    // The other half of the safety net: uncoveredObjectives catches material
+    // that is never practised, this catches material that is practised and
+    // never explained. Both fixture cards point at storage.lvm.resize, so
+    // users.local.create is drilled by a task with nothing to read.
+    const report = checkCoverage(await loadBank(BANK))
+    expect(report.objectivesWithoutConcept).toEqual(['users.local.create'])
+  })
+
+  it('counts an instrumental task as exercising an objective that then needs a card', async () => {
+    // Deliberately looser than coveredObjectives. An instrumental task cannot
+    // claim coverage (spec 6.4) but it does put the objective in front of the
+    // student, so it is exactly the population that still needs an explanation.
+    const bank = await loadBank(BANK)
+    const task = bank.tasksById.get('users/001-create-account')
+    if (!task) throw new Error('fixture missing')
+    task.scope = 'instrumental'
+
+    const report = checkCoverage(bank)
+    expect(report.objectivesWithoutConcept).toEqual(['users.local.create'])
+  })
+
+  it('lists objectives no task exercises and no card teaches', async () => {
+    // Spec 6.2: never taught and never demonstrated. autofs has neither.
+    const report = checkCoverage(await loadBank(BANK))
+    expect(report.untouchedObjectives).toEqual(['autofs.maps.configure'])
+  })
+
+  it('stops calling an objective untouched once a card teaches toward it, while it stays uncovered', async () => {
+    // Distinguishes the two questions: a card removes "never taught", only an
+    // exam-objective task removes "not covered". Collapsing them would let a
+    // card silently retire an objective nothing practises.
+    const bank = await loadBank(BANK)
+    const concept = bank.conceptsById.get('storage.orphan-concept')
+    if (!concept) throw new Error('fixture missing')
+    concept.objectives = ['autofs.maps.configure']
+
+    const report = checkCoverage(bank)
+    expect(report.untouchedObjectives).toEqual([])
+    expect(report.uncoveredObjectives).toEqual(['autofs.maps.configure'])
+  })
+
+  it('lists cards nothing a task requires can reach, even transitively', async () => {
+    const report = checkCoverage(await loadBank(BANK))
+    expect(report.unreachableConcepts).toEqual(['storage.orphan-concept'])
+  })
+
+  it('treats a card reachable only as a prerequisite as deliverable, unlike untaughtConcepts', async () => {
+    // The reason unreachableConcepts exists alongside untaughtConcepts. No task
+    // names the orphan card, so it stays untaught — but a task-required card now
+    // needs it first, so the student does get it, and it must not be reported as
+    // content that can never be delivered.
+    const bank = await loadBank(BANK)
+    const concept = bank.conceptsById.get('storage.lvm-abstraction-stack')
+    if (!concept) throw new Error('fixture missing')
+    concept.prerequisites = ['storage.orphan-concept']
+
+    const report = checkCoverage(bank)
+    expect(report.problems).toEqual([])
+    expect(report.untaughtConcepts).toEqual(['storage.orphan-concept'])
+    expect(report.unreachableConcepts).toEqual([])
+  })
+
   it('excludes instrumental tasks from objective coverage', async () => {
     // Chapter 21 Apache teaches SELinux and firewalld through a non-objective
     // service. It must not be able to claim coverage of an objective on its own.
