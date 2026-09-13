@@ -3,12 +3,15 @@
 > The user completes a real graded LVM lab end to end including the reboot
 > check, having learned the concept from a concept card rather than a book.
 
-> **Status: NOT YET RUN.** The manual half below is a blank form. Nothing in it
-> has been filled in, because the VM does not exist yet — the RHEL 9 DVD ISO is
-> not downloaded. Phase 1's exit criterion is therefore **not met** as of this
-> commit. When you run it, fill the form in yourself; if you find it already
-> filled in, something wrote answers it did not earn and you should distrust
-> the file.
+> **Status: the manual half below is still a blank form.** Nothing in it has been
+> filled in. What changed on 2026-09-06 is the reason: the VM now exists, the
+> automated half has run green once, and both validate runs have been executed —
+> so the blocker is no longer the missing ISO but the fact that only you can
+> answer what the form asks. Phase 1's exit criterion is therefore **not met** as
+> of this commit, and the validate runs found two real content defects on the way
+> (see "The two full-bank validate runs"). When you run it, fill the form in
+> yourself; if you find it already filled in, something wrote answers it did not
+> earn and you should distrust the file.
 
 Two halves. The automated half is `test/vm/e2e-exit-criterion.vm.test.ts`,
 run with `npm run test:vm`. It proves the spine works: bank, session,
@@ -97,6 +100,11 @@ likely to rot unnoticed, because nothing fails when they break.
    - This is the output the whole design exists to produce. A run that reports a
      plain failure here, with no mention of persistence, is a defect and not a
      wording preference.
+   - **Known defect, expect it:** unmounting `/home` is what defect 2 in "The two
+     full-bank validate runs" describes, and the grader stops early once `/home` is
+     gone. `lv-home-size` and `var-intact` will likely be *missing* from the
+     post-reboot report rather than shown. Record what you actually see; a missing
+     checkpoint here is the already-known bug, not a new finding.
 
 ## Third: the foreign-origin refusal check, not yet run
 
@@ -138,11 +146,13 @@ checklist; there is no parallel one. Every check has a home above.
 | 14 reset lab reverts machine and clock but not disclosure | "Fourth: reset", below |
 | 15 foreign-origin WebSocket refusal | "Third", above |
 
-**† The assertion exists; it has never executed.** `test/vm/e2e-exit-criterion.vm.test.ts`
-is excluded unless `RHCSA_VM=1`, and no VM exists, so a `†` row has a *written*
-assertion rather than a passing one. Read those four rows as "there is a test
-waiting to run", not as coverage. The e2e suite has to run green once before any
-`†` means what a "Covered by" column normally means.
+**† The assertion has now executed, once.** `test/vm/e2e-exit-criterion.vm.test.ts`
+is excluded unless `RHCSA_VM=1`, and until 2026-09-06 no VM existed, so a `†` row
+carried a *written* assertion rather than a passing one. On 2026-09-06 at 15:04
+`npm run test:vm` ran it against the real guest and it passed — `teaches the
+concept, grades the solution and survives the reboot`, 1 test, 102.6 s, exit 0.
+So a `†` now means coverage in the ordinary sense. One green run is not a habit,
+though: it has never run twice, and nothing runs it automatically.
 
 Checks 1, 7, 8 and 9 carry predictions rather than assertions: check 1's task
 count, check 7's `5 / 5`, check 9's partial `3 / 5` tally in exam mode, and check
@@ -166,8 +176,11 @@ derived.
 
 ## The two full-bank validate runs
 
-Also NOT YET RUN, for the same reason. The exit criterion is about one task, but
-shipping a broken sibling is not a thing to discover in month three.
+**Both have now run.** Results are recorded at the end of this section: the
+`vmrun` run was clean, the `ssh` run was not. The exit criterion is about one
+task, but shipping a broken sibling is not a thing to discover in month three —
+and this is precisely what that earned. Two defects, one of them a grader telling
+a correct answer it was wrong.
 
 **Two runs, not one.** `npm run validate` with no arguments loads the whole bank,
 and the transport is chosen once for the whole run — derived as `vmrun` if *any*
@@ -192,7 +205,10 @@ npm run validate -- \
 echo "exit=$?"
 tail -40 /tmp/validate-ssh.log
 
-# the vmrun task on its own: 6 fixtures, 15-20 minutes
+# the vmrun task on its own: 6 fixtures, 15-20 minutes.
+# Only needed if RHCSA_GUEST_PASSWORD is not already in .env.local. On this
+# machine it is, and `npm run validate` loads it from there, so the prompt below
+# is redundant here — skip it rather than risk failing a 20-minute run on a typo.
 read -rsp 'student password: ' RHCSA_GUEST_PASSWORD && export RHCSA_GUEST_PASSWORD
 npm run validate -- troubleshooting/028-restore-remote-access > /tmp/validate-vmrun.log 2>&1
 echo "exit=$?"
@@ -201,7 +217,14 @@ tail -20 /tmp/validate-vmrun.log
 
 The `read -rsp` form keeps the password out of your shell history. Do not paste
 the password into the command line, and do not add it to `.env.local` unless you
-want it on disk — `scripts/provision.sh` writes that key blank on purpose.
+want it on disk — `scripts/provision.sh` writes that key blank on purpose. On
+this machine that choice has been made and the key is set, which is why the
+prompt is skippable above; the guidance stands for anyone starting fresh.
+
+**Do not leave the only record in `/tmp`.** The first attempt at these two runs
+was lost exactly that way on 2026-09-06: WSL restarted about 80 minutes in, `/tmp`
+was wiped, and both logs and the whole result went with it. Write them somewhere
+under `$HOME`, and detach the run so a closing terminal cannot take it either.
 
 Expected: `transport: ssh` and **`26/26 fixtures ok`** from the first run,
 `transport: vmrun` and **`6/6 fixtures ok`** from the second. Thirty-two
@@ -215,8 +238,44 @@ fails**, so a healthy bank contributes none. Per task that is
 The four ssh tasks are 26, `028` alone is 6, and the bank is 32. Recounting from
 the file tree alone gives 22 and 5 and makes a correct run look wrong.
 
-- ssh run: date, transport, fixtures ok:
-- vmrun run: date, transport, fixtures ok:
+- ssh run: 2026-09-06 23:23 to 2026-09-07 17:46, `transport: ssh`,
+  **21/26 fixtures ok, exit 1.** Five failures, two distinct causes, both below.
+- vmrun run: 2026-09-07, `transport: vmrun`, **6/6 fixtures ok, exit 0.** Clean,
+  and the second time the `vmrun` path has been exercised end to end.
+
+The wall-clock figure on the ssh run is not a measurement of anything: the host
+slept partway through. Do not read 18 hours as the cost of 26 fixtures — the
+45-60 minute estimate above is still the one to plan against.
+
+**Defect 1, fixed: `users/006-team-provisioning` failed four fixtures on
+`carol-expiry`.** `grade.sh` built the expected day count from a *local* midnight,
+`date -d 2027-06-30 +%s / 86400`, which on this Asia/Manila guest truncates to
+20998, while `chage -E 2027-06-30` and `useradd -e 2027-06-30` both store 20999.
+The comment above it argued for local time and explicitly forbade `-u`, with the
+sign of the error inverted; `-u` is the fix. It was invisible on a UTC guest,
+which is how it survived authoring and review. This is the **false-fail**
+direction: three solutions and an anti-solution all told a student who typed
+exactly what the prompt asks that carol's expiry was wrong. `setup.sh`'s EXPIRE
+guard used the same idiom and was *not* wrong — it compares two dates that both go
+through the same conversion, so the offset cancels — but it now spells it `-u`
+too, so that it cannot be read as licence for the comparison `grade.sh` had.
+Corrected on 2026-09-07. `npm run lint:content` is clean and the 474-test unit
+suite passes, but **the fix has not been re-validated against the guest**: doing
+so reverts the snapshot on every fixture, and the manual run above had the machine
+at the time. Re-run `npm run validate -- users/006-team-provisioning` before
+trusting it.
+
+**Defect 2, open: `storage/014-grow-home-lv`, `antisolutions/02-removed-persistence.sh`.**
+After the reboot, `lv-home-size` and `var-intact` were *absent* from verdict B
+rather than reported: "this checkpoint was not reported after the reboot; the
+grader likely stopped before reaching it". The grader stops early when `/home` is
+not mounted. This is the fail-open shape `006`'s own JSONL note warns about — a
+checkpoint that vanishes reads as a pass to anything counting failures — so it is
+the more dangerous of the two even though it cost one fixture against four. It
+does not affect a correct solve, where `/home` stays mounted and the grader runs
+to the end, which is the path the e2e proves green at 5/5. It does affect the
+persistence scenario under "Second manual scenario", which deliberately unmounts
+`/home`: expect a degraded report there until this is fixed.
 
 If a fixture fails, fix the content, not the assertion.
 
@@ -267,16 +326,33 @@ If a fixture fails, fix the content, not the assertion.
   under this project, the delta is already enumerated rather than guessed.
   The `editions:` field on tasks stays too — it is how a task records that
   its material is durable across the boundary.
-- R1 — can WSL2 reach a VMnet8 guest over TCP/22 — remains **INCONCLUSIVE**.
-  The guest half was never run, because there is no guest. See
-  `docs/r1-findings.md`. A related sharp edge in `scripts/r1-probe.sh`: the
+- R1 — can WSL2 reach a VMnet8 guest over TCP/22 — is **RESOLVED, yes**, as of
+  2026-09-06. It had been inconclusive only because there was no guest to test
+  against. There is now: `npm run test:vm` and both validate runs all printed
+  `transport: ssh` and drove 32 fixtures over TCP/22, and a cold probe after a
+  snapshot revert found port 22 open in about 5 s. No firewall workaround was
+  needed, so none of the fallbacks in `docs/r1-findings.md` were applied. Keep
+  that document: a Windows update can undo the condition that makes this work,
+  and the symptom would be the server silently choosing `vmrun`.
+  A related sharp edge in `scripts/r1-probe.sh` is still open: the
   summary's catch-all `*)` arm prints "R1 CONFIRMED AS A PROBLEM" for the
   `unknown` outcome as well as for `dropped`, so a failure the probe could
   not classify reads as a confirmed firewall problem. The classification
   itself is sound — a 5-second TCP timeout is `rc=124` and is handled
   explicitly, not swept into `unknown`.
-- Nothing in Task 25's checklist above has been run. See the banner at the
-  top: no VM exists on this machine yet.
+- Of Task 25's checklist above, the machine-checkable parts have now run and the
+  human parts have not. Done: the e2e (`npm run test:vm`), both validate runs, and
+  R1. Not done, and not something anything but a person can do: "The run", the
+  second manual scenario's two halves, the foreign-origin check, and reset. The
+  `†` rows in the table are real coverage now; every other row is still a
+  prediction.
+- A known-good `clean` snapshot is not a known-good *current* state. `validate`
+  reverts before each fixture and not after the last one, so the guest is left
+  holding whatever the final fixture did — and the final fixture of the `vmrun`
+  run belongs to `028-restore-remote-access`, whose anti-solutions break networking
+  on purpose. After a validate run the guest is unreachable until it is reverted
+  and started again. That is correct behaviour presenting as a broken VM, and it
+  cost a round of diagnosis on 2026-09-07 before the shape was recognised.
 
 Those limits are the Phase 2 backlog stated as facts rather than promises. Do
 not soften them; a limit you can read is a limit you can plan around.
@@ -285,12 +361,17 @@ not soften them; a limit you can read is a limit you can plan around.
 
 In this order. Only the last step makes the `phase-1` tag's message true.
 
-1. Download the RHEL 9 binary DVD ISO from your own Red Hat Developer account
-   and run `bash scripts/provision.sh`.
-2. `npm run test:vm` — the automated half.
-3. Both `npm run validate` runs above — 26/26 then 6/6.
+1. ~~Download the RHEL 9 binary DVD ISO from your own Red Hat Developer account
+   and run `bash scripts/provision.sh`.~~ **Done.** The VM exists and is
+   provisioned.
+2. ~~`npm run test:vm` — the automated half.~~ **Done**, green, 2026-09-06 15:04.
+3. Both `npm run validate` runs above — 26/26 then 6/6. **Run, not yet passed:**
+   6/6 on `vmrun`, 21/26 on `ssh`. `006`'s cause is fixed and unverified; `014`'s
+   is open. This step needs `npm run validate -- users/006-team-provisioning` to
+   confirm the fix, the `014` grader repaired, and then 26/26 for real.
 4. The manual run at the top of this file, filled in by hand, including the
-   book question.
+   book question. Independent of step 3 — `014` grades correctly on a correct
+   solve, so this does not have to wait.
 5. `git tag -a phase-1 -m "Phase 1: five tasks, ten cards, graded end to end
    with the reboot check"` — **after** step 4, because only then is that
    message true.
