@@ -1,0 +1,65 @@
+id: users/041-switching-users-and-prompt
+title: Hand over the oncall account
+# Both objectives below are chapter 5 material in one edition or the other only
+# in part: users.login.switch carries chapters: [5] and tools.shell.prompt
+# carries chapters: [2] in content/objectives.yaml. chapter is a single integer,
+# so it names the chapter the task is *filed* under, which is the one its primary
+# objective comes from - the same choice sys/035 makes when it claims objectives
+# from chapters 12 and 13 and files itself under 13. Switching users is the
+# primary objective here: the prompt half exists because `su` and `su -` read
+# different startup files, so it is only gradable through the switch.
+chapter: 5
+scope: exam-objective
+rhel: 9
+objectives:
+  - users.login.switch
+  - tools.shell.prompt
+requires_concepts:
+  - users.login-shells-and-su
+  - users.shell-field-and-locked-accounts
+  - users.account-creation-defaults
+  - tools.prompt-ps1-and-startup-files
+difficulty: 3
+time_budget: 600
+# Both objectives survive verbatim into R10's table, in the same two chapters
+# (see content/objectives-rhel10.yaml: tools.shell.prompt chapters [2],
+# users.login.switch chapters [5], the latter reworded from "multiuser" to
+# "multi-user" and keeping its id). Durable core material.
+weight: high
+editions: [r9, r10]
+# FALSE, deliberately, and this is the judgement call in this file. Every state
+# this task grades already lives in a file: field 7 of /etc/passwd, field 2 of
+# /etc/shadow, and a PS1 assignment in a startup script. There is no
+# runtime-versus-config split for a reboot to expose - unlike sys/035, where the
+# journal on disk and the journal in /run are two different things. The grader
+# also never measures the shell the student is sitting in: every probe starts a
+# fresh shell through su, so an answer that only changed the current session
+# fails immediately rather than after a reboot. A reboot here would cost a
+# revert-and-boot cycle per fixture and could not observe anything verdict A
+# does not already observe.
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  A contractor joins the on-call rota tomorrow. Someone created the account
+  oncall for them last week and then went on leave, and nobody has been able to
+  use it since: it exists on this host, and that is all that can be said for it.
+
+  Leave the machine in a state where all of the following are true.
+
+  - Someone at the console can log in as oncall and land in a Bash shell. Right
+    now they cannot, for two independent reasons, and both are yours to fix. You
+    choose the password.
+  - The prompt of a shell running as oncall shows three things: the name of the
+    account, the name of this host, and the whole path of the current directory
+    rather than only its last component. Lay them out however you like, as long
+    as all three are visible.
+  - That holds for every interactive Bash shell that runs as oncall - the one
+    the contractor gets by logging in, and the one an administrator gets by
+    switching into the account from a session they are already in. Check both
+    before you call it done: an interactive shell that is not a login shell does
+    not read the same startup files, and a prompt verified only one way is the
+    usual way to get this wrong.
+  - It holds for shells started later too, not only for the shell you tested in.
+  - No other account's prompt changes, student's included, and nothing you do
+    changes how student logs in.

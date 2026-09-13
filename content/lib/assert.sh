@@ -5,6 +5,33 @@
 #   - the grader's own exit code is ignored
 #   - graders are READ-ONLY: they never change the system they measure
 #
+# ------------------------------------------------------------------
+# Trap that has cost this bank two false verdicts: `producer | grep -q` under
+# `set -o pipefail`, which every grade.sh and setup.sh here sets.
+#
+# grep -q exits the instant it matches. The producer is then killed by SIGPIPE
+# and exits 141, and pipefail reports the PIPELINE as 141 - a failure for a
+# search that succeeded. Measured: `PIPESTATUS=141 0`, grep found its match and
+# the pipeline still reported failure.
+#
+# It only fires when the match sits more than one 64 KiB pipe buffer from the end
+# of the stream, so it hides completely on small output and is perfectly
+# reproducible on large output. That asymmetry is what makes it dangerous: it
+# passes review, passes most fixtures, and then fails one. Both real cases were
+# exactly that shape - `journalctl -b | grep -q marker` in sys/035's setup, which
+# aborted every fixture, and `printf '%s\n' "$diff_out" | grep -q path` in
+# containers/031's grader, which failed a checkpoint for a fixture whose file was
+# demonstrably present and printed a detail line asserting the opposite.
+#
+# Write it so the consumer reads to EOF:
+#
+#   cmd | grep -F -- "$pat" >/dev/null     # not: cmd | grep -qF -- "$pat"
+#   [[ -n $(cmd) ]]                        # not: cmd | grep -q .
+#
+# `head`, `grep -m`, and `sed -n '…q'` are the same hazard. A consumer that reads
+# its whole input is not - `tr`, `tail`, `wc`, and `awk` without `exit` are all
+# safe, which is why every pipeline in this file is written with one.
+#
 # shellcheck shell=bash
 
 # ------------------------------------------------------------------ output

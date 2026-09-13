@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Prepare the system for storage/014-grow-home-lv.
 #
-# Idempotent: reset reverts to the `clean` snapshot, but setup must also
-# survive being run twice against the same machine.
+# NOT idempotent, and it must not claim to be: /home is XFS, XFS cannot shrink,
+# and nothing in this file reduces it, so once the task has been solved on a
+# guest the only way back to a runnable baseline is a revert to the `clean`
+# snapshot. The size precondition below says exactly that when it fires. This
+# header used to promise the opposite, which is worse than useless: it invites
+# the next author to "restore" idempotence by staging a machine on which
+# lv-home-size and fs-home-size pass with no work done.
 set -euo pipefail
 
 fail() { printf 'setup: %s\n' "$*" >&2; exit 1; }
@@ -32,13 +37,13 @@ esac
 home_lv_bytes=$(sudo lvs --noheadings --nosuffix --units b -o lv_size rhel/home 2>/dev/null | tr -d ' ')
 [[ -n $home_lv_bytes ]] || fail "could not read the size of the rhel/home logical volume"
 if (( home_lv_bytes >= 12348030976 )); then
-  fail "rhel/home is already ${home_lv_bytes} bytes (>= 11.5 GiB); docs/vm-build-checklist.md:74 specifies an 8 GB LV, so this guest was built wrong"
+  fail "rhel/home is already ${home_lv_bytes} bytes (>= 11.5 GiB), so lv-home-size and fs-home-size would pass with no work done. The likeliest cause is that this task has already been solved on this guest: /home is XFS, XFS cannot shrink, and nothing here reduces it - so this task is one-shot and a revert to the \`clean\` snapshot is what makes it runnable again. Only if this guest has never been solved is the size a build defect, and then docs/vm-build-checklist.md:74 is the line to check (it specifies an 8 GB LV)"
 fi
 
 free_extents=$(sudo vgs --noheadings --nosuffix --units b -o vg_free rhel 2>/dev/null | tr -d ' ')
 [[ -n $free_extents ]] || fail "volume group 'rhel' not found"
 if (( free_extents < 5 * 1024 * 1024 * 1024 )); then
-  fail "VG rhel has only ${free_extents} bytes free; this task needs at least 5 GiB"
+  fail "VG rhel has only ${free_extents} bytes free; this task needs at least 5 GiB. A clean guest ships 15 GiB free, so something is holding the extents: storage/034-new-volume-and-swap spends 5 GiB on the same volume group and returns them the next time its own setup runs, so running that setup once will release them. Extents missing for any other reason mean a revert to the \`clean\` snapshot"
 fi
 
 # --- create the pressure the prompt describes -----------------------------

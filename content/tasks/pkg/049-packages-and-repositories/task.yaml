@@ -1,0 +1,122 @@
+id: pkg/049-packages-and-repositories
+title: Install three packages from three different sources
+# pkg.dnf.install carries chapters: [9] in content/objectives.yaml and it is the
+# only objective this task claims, so there is nothing to arbitrate.
+chapter: 9
+scope: exam-objective
+rhel: 9
+objectives:
+  - pkg.dnf.install
+# pkg.repos-and-dnf already existed and this is the first exam-objective task to
+# name it: it covers the ini file, gpgcheck/gpgkey, `dnf install ./pkg.rpm` and
+# the provides/search/group/history commands. The new card is deliberately about
+# the half that card does not carry - what "installed" means to rpm's database,
+# what verifies a signature and what does not, and how dnf really reads a
+# repository file's booleans - because every checkpoint here is decided either by
+# the rpm database or by the text of a .repo file.
+requires_concepts:
+  - pkg.repos-and-dnf
+  - pkg.rpm-vs-dnf-and-local-installs
+# 2, not 3. Three installs and five lines of ini, and a candidate who has read
+# the chapter types them without stopping. What earns the 2 rather than a 1 is
+# that two of the three routes are not the obvious one: the package file in
+# /var/tmp is useless to anyone who only knows `dnf install <name>`, and the
+# AppStream repository has to be enabled in the FILE rather than for the length
+# of one command, which is the mistake antisolutions/03 is built out of.
+difficulty: 2
+# 600s. Measured shape rather than a guess: three dnf transactions against
+# file:// repositories on this guest, one of which loads AppStream's metadata for
+# the first time, plus writing five lines with a text editor. The dnf runs
+# dominate and they are slow on a 2-vCPU VM.
+time_budget: 600
+# High. "Install and update software packages" is one of the shortest sentences
+# in the objective list and one of the widest: nothing else on the exam can be
+# done on a machine where dnf does not work, and a candidate who cannot add a
+# repository cannot install the tool the next question needs. R10's table renames
+# the objective to pkg.dnf.install-cdn (content/objectives-rhel10.yaml:214) -
+# "Red Hat Network" became "Red Hat Content Delivery Network" - and changes
+# nothing else, so this material carries forward whole.
+weight: high
+editions: [r9, r10]
+# False, deliberately, and the reasoning is the interesting part of this file.
+#
+# Everything this task grades is one of two things: a row in the rpm database, or
+# the text of a file under /etc/yum.repos.d. Both survive a reboot by
+# construction - rpm's database is on disk and nothing rebuilds it at boot, and a
+# repository file is read fresh by every dnf invocation - so a second verdict
+# would repeat the first, checkpoint for checkpoint, and tell a student nothing
+# they did not already know.
+#
+# The one candidate for a reboot-only failure was considered and rejected: a
+# repository whose baseurl points at a mount the student created by hand and left
+# out of /etc/fstab. It cannot arise here, because the prompt names the path -
+# /mnt/rhcsa-dvd/AppStream, mounted from the disc by an fstab line
+# scripts/guest-provision.sh wrote - and a student who invents a second mount for
+# the same directory fails appstream-repo-defined at once, in verdict A, for
+# naming a path the prompt did not ask for.
+#
+# So the reboot would cost every validation run of this task one boot cycle and
+# buy no information. `false` is not laziness here; it is the honest reading.
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  This host has no internet access and no subscription attached. The RHEL 9
+  installation DVD is attached to it and mounted read-only at /mnt/rhcsa-dvd,
+  and /etc/yum.repos.d/rhcsa-dvd.repo describes one repository taken from that
+  disc: its BaseOS directory. The disc also carries an AppStream directory, at
+  /mnt/rhcsa-dvd/AppStream, and nothing on this host is currently configured to
+  use it.
+
+  Three packages have to end up installed, and each one comes from a different
+  place.
+
+  - tree. The BaseOS repository this host already has offers it. Install it
+    from there.
+  - telnet. No repository this host has offers it today: a copy of its package
+    file has been left in /var/tmp/rhcsa-packages, and installing it from that
+    file is the point of this one.
+  - whois. It is in the disc's AppStream directory and nowhere else on this
+    machine, so before you can install it you have to add a repository of your
+    own. That repository must:
+
+    - serve /mnt/rhcsa-dvd/AppStream, and no other path;
+    - be enabled in its own configuration, not merely for the length of one
+      command;
+    - check the signatures of the packages it hands out. The disc's key is
+      already imported on this host, and the key file itself is on the disc at
+      /mnt/rhcsa-dvd/RPM-GPG-KEY-redhat-release if you would rather name it.
+
+    Call the repository whatever you like and put it in whichever file you
+    like - nothing here depends on either.
+
+  Three things to leave alone, and they are not decoration:
+
+  - The BaseOS repository this host arrived with has to still be there and
+    still work when you are finished. Adding a repository means adding one, not
+    replacing what is already configured.
+  - Nothing that is already installed may be removed, and nothing may be
+    updated or upgraded. This host is deliberately held at one patch level, and
+    the disc is the only thing it can reach in any case.
+  - Do not unmount /mnt/rhcsa-dvd. Every repository on this machine, including
+    the one you are about to add, is a directory on that disc.
+
+  Two things about how this is marked, said plainly rather than left to be
+  discovered:
+
+  - telnet is graded as "installed", nothing more. rpm's database has no field
+    for where a package came from, so no grader can tell an install from the
+    staged file apart from any other install of the same package. Doing it the
+    way it is asked is on you.
+  - the disc's AppStream directory carries telnet as well, so once you have
+    added the repository the third requirement asks for, `dnf install telnet`
+    starts working too. That is not a trap and it is not the exercise; the
+    package file is there so that you practise the case where there is no
+    repository to reach for at all.
+
+  One way this lab is not like the exam, worth knowing rather than guessing at:
+  the objective reads "from Red Hat Network, a remote repository, or from the
+  local file system", and this host can reach no network at all. Every
+  repository here is therefore a directory on a mounted disc, named by a file://
+  address. The repository file, its settings and the commands that read it are
+  identical for an http:// repository; only the address changes.

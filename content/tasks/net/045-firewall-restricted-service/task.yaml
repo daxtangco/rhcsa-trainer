@@ -1,0 +1,54 @@
+id: net/045-firewall-restricted-service
+title: Let only the monitoring network reach the reporting service
+# net.firewall.restrict-access carries chapters: [23] in content/objectives.yaml,
+# and it is the only objective this task claims, so there is nothing to arbitrate.
+chapter: 23
+scope: exam-objective
+rhel: 9
+objectives:
+  - net.firewall.restrict-access
+requires_concepts:
+  - net.firewalld-rich-rules-and-sources
+  - net.firewalld-zones
+  - net.firewalld-runtime-vs-permanent
+# 3, not 4. There is one mechanism to choose and two copies of the configuration to
+# keep straight, and setup.sh has already installed, configured and started the
+# service being protected - so nothing here is a multi-subsystem hunt the way
+# troubleshooting/028 or selinux/019 is. It is above a 2 because the restriction
+# half has no "deny" to type: a candidate who has only ever run --add-port has
+# never met the shape of this answer.
+difficulty: 3
+time_budget: 600
+# The objective is renamed in R10 - content/objectives-rhel10.yaml:233 is
+# net.firewall.restrict-access-firewalld, "Restrict network access using firewalld
+# and firewall-cmd" - but it is the same objective in the same chapter 23 with the
+# same tool, so the rename is editorial and this task is durable core material.
+weight: high
+editions: [r9, r10]
+# True, and it is the whole point. A rich rule or a source-bound zone added without
+# --permanent filters correctly this second and is gone at the next reload, which is
+# the single most common way this objective is failed - antisolutions/01 is exactly
+# that answer. source-allowed-runtime changes meaning between the two verdicts:
+# before the reboot it only says the student made the running firewall right, after
+# it says the configuration was written down.
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  This host runs an internal reporting service. It is installed, running,
+  enabled at boot, and listening on TCP port 8080; you do not need to change
+  it.
+
+  The monitoring network 10.42.7.0/24 must be able to reach that service. No
+  other address may reach it.
+
+  - Traffic from 10.42.7.0/24 must be permitted to TCP 8080 on this host.
+  - TCP 8080 must not be reachable from anywhere else. Do not simply open the
+    port.
+  - The arrangement must still be in effect after a reboot.
+  - Leave SSH working. You are being marked over it, and a change that takes
+    tcp/22 away costs you every checkpoint, not one.
+
+  There is no machine on 10.42.7.0/24 in this lab, so you cannot prove the rule
+  by connecting from there. Make the configuration right and check it with the
+  firewall's own tools.

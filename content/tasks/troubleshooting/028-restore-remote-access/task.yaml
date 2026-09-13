@@ -12,6 +12,8 @@ requires_concepts:
   - systemd.enabled-vs-started
   - net.firewalld-runtime-vs-permanent
   - net.nm-connections-are-the-config
+  - net.service-reachability
+  - net.firewalld-zones
 difficulty: 4
 time_budget: 900
 weight: high

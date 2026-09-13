@@ -1,0 +1,63 @@
+id: sys/040-time-and-tuning
+title: Point the clock at the site time server and tune for throughput
+# The two objectives sit in different chapters: sys.time.chrony carries
+# chapters: [25] in content/objectives.yaml and sys.tuned.profiles carries [10].
+# chapter is a single integer, so it names the chapter this task is *filed*
+# under, and the convention this bank already follows is "the chapter the
+# primary objective comes from" - the choice
+# sys/035-persistent-journal-and-schedule and systemd/017-boot-time-service both
+# made. Time is the primary objective here: six of the eight goal checkpoints
+# are the clock, and the tuning profile is the second half of the same
+# hand-over ticket rather than the point of it.
+chapter: 25
+scope: exam-objective
+rhel: 9
+objectives:
+  - sys.time.chrony
+  - sys.tuned.profiles
+requires_concepts:
+  - sys.time-zones-and-the-rtc
+  - sys.time-sources-and-chronyd
+  - sys.tuned-profiles-and-persistence
+  - systemd.enabled-vs-started
+difficulty: 3
+time_budget: 720
+# Both objectives survive into R10's table with the same text and the same
+# chapters (content/objectives-rhel10.yaml:134 and :207), and the tools are the
+# same ones - chronyd, timedatectl, tuned-adm. Nothing here is R9-only.
+weight: high
+editions: [r9, r10]
+# True, and it earns it twice over. Half the failure modes this task exists to
+# teach are invisible until the machine comes back: a time source added with
+# `chronyc add server` is gone, and a tuning profile applied by a tuned that was
+# started but never enabled is gone. chronyd-active and tuned-profile change
+# meaning between the two verdicts - before the reboot they only say the student
+# started something, after it they can only be true because systemd pulled it in
+# at boot.
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  This host was cloned from a template and handed over with its clock and its
+  tuning left at the template's defaults. It is being racked in the Tokyo site,
+  which runs a time server of its own at 192.0.2.10, and it will carry a
+  database the capacity team wants tuned for throughput.
+
+  Finish the hand-over so that all of the following are true, and are still
+  true after a reboot:
+
+  - The system's time zone is Asia/Tokyo.
+  - The time service is running now, and starts by itself at boot.
+  - The host takes its time from 192.0.2.10 and from nothing else. No other
+    time source may be configured.
+  - The tuning profile in effect is throughput-performance.
+
+  Leave the hardware clock alone: this site keeps the RTC in UTC, and the
+  audit team depends on that.
+
+  One thing about this lab, so you do not go hunting for a fault that is not
+  there: nothing here can reach 192.0.2.10. It is an address from the
+  documentation range and the lab has no route to it, so the source will sit
+  unreachable forever and `chronyc tracking` will never report a synchronised
+  clock. That is expected. What is being asked for above is configuration and
+  service state, and none of it depends on the packet coming back.

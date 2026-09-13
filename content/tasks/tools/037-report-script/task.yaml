@@ -1,0 +1,76 @@
+id: tools/037-report-script
+title: Write an account inventory report script
+# All four objectives below carry chapters: [19] in content/objectives.yaml, so
+# there is no judgement call to make here: 19 is both the chapter the objectives
+# sit in and the chapter this task is filed under. (sys/035 files itself under
+# the chapter of its primary objective because its three objectives disagree;
+# these four do not.)
+chapter: 19
+scope: exam-objective
+rhel: 9
+objectives:
+  - tools.script.inputs
+  - tools.script.loops
+  - tools.script.conditionals
+  - tools.script.command-output
+requires_concepts:
+  - tools.script-arguments-and-exit-status
+  - tools.script-reading-lines
+  - tools.script-command-substitution
+  - tools.script-test-and-conditionals
+  - tools.redirection-and-streams
+difficulty: 3
+time_budget: 900
+# All four objectives survive verbatim into R10's table, in the same chapter, so
+# the whole "Create simple shell scripts" section is durable core material.
+weight: high
+editions: [r9, r10]
+# FALSE, deliberately, and this is the judgement call in this file. The artefact
+# the prompt asks for is a file under /usr/local/bin, which is persistent by
+# construction: nothing about it can be "set for this boot only" the way a
+# started-but-not-enabled service or an un-flushed journal can. A reboot phase
+# would re-run the same eight probes against the same file and prove nothing
+# beyond what verdict A already proved, at the cost of a guest reboot. Compare
+# sys/035, which sets this true because there `crond-active` and
+# `journal-history` mean different things after a reboot than before it. Nothing
+# here does.
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  The audit team keeps sending you lists of account names and asking which of
+  them still exist on this host, and which of the ones that do are real people
+  rather than service accounts. Write the report once instead of answering by
+  hand every time.
+
+  Leave an executable script at /usr/local/bin/rhcsa-account-report that takes
+  the path to one of those lists as its first argument.
+
+  For every non-empty line of the list, in the order the list gives them, the
+  script must print exactly one line on standard output, with the fields
+  separated by whitespace:
+
+  - NAME missing        - no local account has that name
+  - NAME system UID     - the account exists and its UID is below 1000
+  - NAME user UID       - the account exists and its UID is 1000 or above
+
+  So for a list of three names whose first two are local accounts, the report
+  would read something like:
+
+      dbsvc system 812
+      wilma user 1043
+      fredo missing
+
+  It must also hold that:
+
+  - Blank lines in the list are ignored, and an empty list is not an error:
+    print nothing and exit 0.
+  - The list you are handed may not end with a newline. That last name still
+    counts.
+  - Run with no argument at all, the script prints a usage message on standard
+    error and exits with status 2.
+  - The report is produced by running the script as student, with no sudo.
+  - The report is read out of this host's account database every time it runs.
+    It will be tried on lists you have not seen.
+
+  One list the audit team already sent is in /home/student/accounts.list.

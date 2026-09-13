@@ -21,11 +21,22 @@ in_devops carol
 ck carol-in-devops "carol is a member of devops" $?
 
 # Field 8 of /etc/shadow is the expiry date as a day count, not a timestamp, so
-# compare day counts. `date -d` is deliberately LOCAL, with no -u: shadow-utils
-# writes this field through strtoday(), which parses a bare YYYY-MM-DD as local
-# midnight and integer-divides by 86400, and both `chage -E` and `useradd -e`
-# go through it. Comparing against a UTC midnight instead is off by one day on
-# every guest ahead of UTC. Do not add -u here.
+# compare day counts. `date -d` is deliberately UTC: what shadow-utils stores for
+# a bare YYYY-MM-DD is that calendar date's own day number, so the expected value
+# has to be built the same way. Local midnight is what gets this wrong - on a
+# guest ahead of UTC it lands on the previous UTC day, and the integer divide then
+# truncates to the day before the one the prompt asked for. Do not drop the -u.
+#
+# This corrects an earlier comment here that claimed the opposite and forbade -u.
+# Measured on this guest, shadow-utils-4.9-16.el9 in Asia/Manila: `chage -E
+# 2027-06-30`, `useradd -e 2027-06-30` and `useradd -g devops -e 2027-06-30` all
+# write 20999; `date -u -d 2027-06-30 +%s / 86400` is 20999 and plain `date` is
+# 20998. Stated as a measurement rather than as a claim about strtoday() on
+# purpose - the divergence is what the grader has to match, whatever the parsing
+# path inside shadow-utils turns out to be. The old form was invisible on a UTC
+# guest, cost four fixtures in the 2026-09-06 validate run, and failed them in
+# the worst direction: three solutions and an anti-solution all told a student
+# who typed exactly what the prompt asks that carol's expiry was wrong.
 #
 # Two steps, not one. Nested inside the arithmetic, a `date` that emitted nothing
 # would leave `want` unset, the comparison below would trip `set -u`, and the
@@ -36,7 +47,7 @@ ck carol-in-devops "carol is a member of devops" $?
 # fail-closed anyway: the epoch read is tested directly below rather than through
 # the value derived from it, so no shadow field 8 - not 0, not the sentinel string
 # itself - can make this pass on a host where `date` produced nothing.
-want_epoch=$(date -d 2027-06-30 +%s 2>/dev/null)
+want_epoch=$(date -u -d 2027-06-30 +%s 2>/dev/null)
 if [ -n "$want_epoch" ]; then
   want=$(( want_epoch / 86400 ))
 else

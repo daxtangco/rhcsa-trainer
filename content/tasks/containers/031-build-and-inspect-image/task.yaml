@@ -1,0 +1,64 @@
+id: containers/031-build-and-inspect-image
+title: Build rhcsa-ubi:v1 on top of the UBI 9 base image
+chapter: 26
+scope: exam-objective
+rhel: 9
+objectives:
+  - containers.images.registry
+  - containers.images.inspect
+  - containers.build.containerfile
+  - containers.podman.manage
+requires_concepts:
+  - containers.image-vs-container
+  - containers.containerfile-layers
+  - containers.registries-and-search
+difficulty: 3
+time_budget: 1200
+# editions: [r9] only, and that is the whole R2 story in one field. The RHCSA 10
+# Cert Guide has no containers chapter and Red Hat's current published
+# objectives have no containers section, so nothing here is cross-edition
+# material (spec 14.4). weight stays medium rather than low because the user is
+# sitting the RHEL 9 exam, where "Manage containers" is eight of the published
+# objectives - the edition delta is recorded by `editions`, not by demoting the
+# weight of an objective that is still on the exam being studied for.
+weight: medium
+editions: [r9]
+# reboot_check: false, deliberately. Nothing in this task is boot-persistent:
+# images live in a storage tree on disk, the answer file is a file, and no
+# service, mount or unit is involved. There is no "works now but gone after a
+# reboot" failure to detect, so a second verdict would cost a reboot per
+# validation run and distinguish nothing. The container objective that IS
+# boot-persistent - containers.systemd.autostart, a Quadlet or a generated unit -
+# belongs to a different task, and that one must set this to true.
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  The platform team wants a standard base image for our own builds, plus a note
+  recording what the upstream image actually gives us.
+
+  Do all of this as student, in your own rootless container storage. Not with
+  sudo, and not in root's storage.
+
+  1. Retrieve the UBI 9 base image registry.access.redhat.com/ubi9/ubi, tag
+     latest, from the registry, and leave it in place when you are done.
+
+  2. Ask your local copy of that image two things and record both answers in
+     /home/student/ubi9-facts.txt:
+       - the command it runs by default when a container is started from it
+         with no arguments, written exactly as the image reports it
+       - its image ID
+     The layout of the file is yours to choose; both answers have to be in it.
+
+  3. /home/student/rhcsa-build is an empty build directory. Write a Containerfile
+     there and build an image called rhcsa-ubi:v1 from it, on top of that base
+     image. The new image must:
+       - carry a file /etc/rhcsa-build.txt that is part of the image itself,
+         put there while the image is built - not a file that only appears
+         because something is mounted in when a container runs
+       - record the label io.rhcsa.owner=student in its metadata
+       - run /bin/cat /etc/rhcsa-build.txt by default, so that starting a
+         container from it with no arguments prints that file
+
+  Both images must still be present when you finish: the UBI 9 base image and
+  rhcsa-ubi:v1. Leave SELinux in enforcing mode.

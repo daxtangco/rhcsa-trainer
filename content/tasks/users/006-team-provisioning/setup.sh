@@ -75,13 +75,19 @@ fi
 # /etc/default/useradd is the default `useradd -e`, so a guest that already sets
 # it to the date the prompt asks for would satisfy carol-expiry from a bare
 # `useradd carol` and the expiry half of the task would grade as done when
-# nobody set an expiry. Compared as a day count in LOCAL time for the same
-# reason grade.sh does - see the strtoday note there. Any other date is
-# harmless: carol-expiry still starts red and the student still has to fix it.
+# nobody set an expiry. Any other date is harmless: carol-expiry still starts red
+# and the student still has to fix it.
+#
+# -u on both `date` calls, matching grade.sh's note. Unlike there it changes
+# nothing here, because this compares two dates that both go through the same
+# conversion, so any offset cancels: local would detect the same EXPIRE values.
+# It is spelled the same way anyway, so that this file cannot be read as the
+# licence for a grader to compare a stored day count against a local midnight.
+# That is the bug grade.sh had, and this guard is the nearest thing to copy from.
 expdef=$(awk -F= '$1 == "EXPIRE" { print $2 }' /etc/default/useradd 2>/dev/null | tail -n1)
 if [ -n "${expdef:-}" ]; then
-  wantday=$(( $(date -d 2027-06-30 +%s) / 86400 ))
-  if expsecs=$(date -d "$expdef" +%s 2>/dev/null); then
+  wantday=$(( $(date -u -d 2027-06-30 +%s) / 86400 ))
+  if expsecs=$(date -u -d "$expdef" +%s 2>/dev/null); then
     if [ "$(( expsecs / 86400 ))" = "$wantday" ]; then
       fail "/etc/default/useradd sets EXPIRE=$expdef, so useradd alone would satisfy carol-expiry"
     fi

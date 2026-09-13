@@ -1,0 +1,71 @@
+id: files/036-links-and-relocation
+title: Relink and archive the telemetry directory
+# Both objectives below carry chapters: [3] in content/objectives.yaml, so there
+# is no chapter to choose between - unlike sys/035, which had to pick one. This
+# task is filed under the chapter both of its objectives sit in.
+chapter: 3
+scope: exam-objective
+rhel: 9
+objectives:
+  - files.links.create
+  - files.manage.copy-move
+requires_concepts:
+  - files.hard-vs-symbolic-links
+  - files.link-count-and-disk-space
+  - files.copy-preserving-attributes
+difficulty: 3
+time_budget: 900
+# Both objectives are on Red Hat's RHEL 10 list with identical wording (see
+# content/objectives-rhel10.yaml), and links and copies are the most durable
+# material on the exam - nothing about ln(1) or cp(1) has changed in a decade.
+weight: high
+editions: [r9, r10]
+# reboot_check: false, deliberately, and this is the judgement call in this file.
+#
+# Nothing here is boot-persistent in the sense the reboot check exists to
+# measure: a directory entry, an inode's link count and a file's mtime are on
+# disk the moment the syscall returns, and no service, unit, mount or kernel
+# setting is involved. There is no "works now, gone after a reboot" failure for a
+# second verdict to catch, so a reboot would cost a full guest cycle per
+# validation run and distinguish nothing - the same reasoning
+# containers/031-build-and-inspect-image records.
+#
+# The one shape that WOULD justify a second verdict is a student who answered
+# "make this path resolve to that file" with `mount --bind`, which is exactly the
+# non-persistent near-miss this field is for. It is not reachable here: a bind
+# mount over /srv/telemetry/current.log leaves it a distinct inode from
+# probe-2026-03.log, so current-hardlink fails in verdict A already, before any
+# reboot. Detected statically, so no reboot is needed to detect it.
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  A telemetry collector on this host drops its capture files into /srv/telemetry
+  and the directory has been left in a mess. Tidy it up, and give the review
+  team a way to read last month's capture without handing them a second copy of
+  it.
+
+  - probe-2026-01.log was filed into /srv/telemetry/incoming by mistake. It
+    belongs directly in /srv/telemetry. It must arrive there as the same file it
+    already is and not as a fresh copy of it: same inode number, same owner,
+    same group, same mode, same modification time. /srv/telemetry/incoming must
+    be gone when you are done.
+  - core.4417 and the scratch directory in /srv/telemetry are debris. Remove
+    them.
+  - /srv/telemetry/current.log must be a second name for probe-2026-03.log: one
+    file with two names, not a copy of it and not a pointer to its path. The
+    collector renames a capture when it rotates it, and current.log must still
+    hold that data after such a rename.
+  - The review team reads last month's capture through /srv/review, which does
+    not exist yet. Arrange /srv/review/probe-2026-02.log so that reading it
+    reads /srv/telemetry/probe-2026-02.log today, and so that it does not keep
+    that capture's disk blocks allocated: when the collector eventually deletes
+    the capture from /srv/telemetry the space must really be freed, and the
+    entry under /srv/review is then allowed to dangle.
+  - Put an archive copy of the finished /srv/telemetry at /srv/archive/telemetry.
+    /srv/archive already exists. Every capture in that copy must keep the owner,
+    group, mode and modification time it has in /srv/telemetry, and the
+    collector.conf entry must still be a pointer to the same path it points at
+    now rather than a copy of the file at the other end of it.
+  - probe-2026-02.log and probe-2026-03.log must be left exactly where and as
+    they are, ownership, mode and timestamps untouched.

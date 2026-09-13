@@ -1,0 +1,51 @@
+id: files/033-shared-group-directory
+title: Make /srv/payroll a working shared directory
+chapter: 7
+scope: exam-objective
+rhel: 9
+objectives:
+  - files.permissions.ugo-rwx
+  - files.permissions.set-gid
+  - files.permissions.umask
+  - files.permissions.troubleshoot
+requires_concepts:
+  - files.special-bits
+  - files.setgid-on-directories
+  - files.umask-arithmetic
+  - files.directory-permission-semantics
+difficulty: 3
+time_budget: 900
+# Three of the four objectives survive into the RHEL 10 set; only "Create and
+# configure set-GID directories for collaboration" was dropped from Red Hat's
+# published list (see the note above files.permissions.set-gid in
+# content/objectives.yaml, and content/objectives-rhel10.yaml). Set-GID
+# directories themselves did not go anywhere, and both "Manage default file
+# permissions" and "Diagnose and correct file permission problems" are still
+# examinable, so this is durable core material in both editions.
+weight: high
+editions: [r9, r10]
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  /srv/payroll is meant to be the payroll team's shared directory and
+  collaboration on it does not work. dana and erik are both members of the
+  payroll group, but neither of them can write there, and the file already in
+  the directory is not shared with anyone.
+
+  Repair it so that all of the following are true:
+
+  - dana and erik can both create, read and edit files in /srv/payroll.
+  - Anything either of them creates in there belongs to the payroll group,
+    without them having to remember to fix the group afterwards.
+  - Neither of them can delete or rename a file that the other one owns.
+  - No user outside the payroll group may read, write or enter /srv/payroll.
+  - dana and erik must each end up with default file permissions that give
+    their group write access and give users outside the group nothing at all.
+    That applies to every file they create, not only to files under
+    /srv/payroll.
+  - handover.txt is already in the directory. It must still be there when you
+    are finished, and the payroll group must be able to read and edit it.
+
+  Everything above must still be true after a reboot, and in a shell opened
+  after the reboot.

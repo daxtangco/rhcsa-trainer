@@ -1,0 +1,88 @@
+id: storage/042-partition-and-volume-group
+title: Partition the spare disk and build a volume group on it
+# storage.partitions.mbr-gpt carries chapters: [14] in content/objectives.yaml;
+# storage.lvm.pv and storage.lvm.vg both carry [15]. `chapter` is a single
+# integer naming the chapter this task is *filed* under, so the dominant chapter
+# wins - the same rule storage/034-new-volume-and-swap and sys/040-time-and-tuning
+# state in their own headers.
+chapter: 15
+scope: exam-objective
+rhel: 9
+objectives:
+  - storage.partitions.mbr-gpt
+  - storage.lvm.pv
+  - storage.lvm.vg
+requires_concepts:
+  - storage.partition-tables-and-tools
+  - storage.pv-vg-lifecycle
+  - storage.lvm-abstraction-stack
+# storage.extents-and-size-syntax is deliberately NOT listed. It teaches `-L 12G`
+# versus `-L +12G` and the extent arithmetic behind lvcreate/lvextend, and this
+# task creates no logical volume at all - the prompt stops at the volume group on
+# purpose, because that is where storage/034-new-volume-and-swap starts. Listing
+# it would put a card in front of the student at rung 2 that answers a question
+# this task never asks. It is required by 014 and 034, so it is still reachable.
+difficulty: 3
+# Four moves (label, partition, physical volume, volume group) with two real
+# decisions in them: which label type, and whether the physical volume goes on
+# the partition or on the whole device. A candidate who knows the tools is done
+# in three minutes; the budget is for the one who has to think about the second
+# decision, and for reading `lsblk` afterwards to check.
+time_budget: 480
+# Both chapters are durable core material: R10's table carries
+# storage.lvm.pv and storage.lvm.vg with identical text and identical chapters
+# (content/objectives-rhel10.yaml:157-162), and its partition objective is the
+# same one with MBR dropped from the wording ("List, create, and delete
+# partitions on GPT disks", :155). GPT is what this task asks for, so nothing
+# here is R9-only.
+weight: high
+editions: [r9, r10]
+# FALSE, and the reason is the lab's hardware rather than the subject matter.
+#
+# No spare disk is attached to this guest and adding one would mean rebuilding
+# the golden image, so setup.sh manufactures the block device: a sparse file
+# attached with `losetup --partscan`. A loop device is set up after boot by
+# something, and nothing sets this one up at boot - so after a reboot the device,
+# its partition, its physical volume and the volume group built on it are all
+# simply gone. That is not a persistence failure a student could have prevented,
+# so grading it would blame them for the lab. reboot_check: true here would also
+# make every checkpoint a "regression" in verdict B for every fixture including
+# both solutions, which is the harness reporting the lab's shape as content
+# failure.
+#
+# Nothing is lost by it. LVM persistence is already graded twice over:
+# storage/014-grow-home-lv checks that a grown /home survives a reboot and
+# storage/034-new-volume-and-swap checks a new volume, its mount and its swap
+# across one, both on the real disk where persistence is a real question. What
+# this task owns - writing a partition table, initialising a physical volume,
+# assigning it to a volume group - is measured completely in verdict A.
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  The archive team has been promised storage of its own on this host, and a
+  spare disk has been made available for it. The lab attaches that disk fresh
+  each time, so its device name is written on the first line of
+  /run/rhcsa-lab/042-spare-device - read it from there rather than guessing.
+
+  Prepare the disk for the archive team:
+
+  - The disk must carry a GPT partition table. Not MBR: the archive team's
+    procedure assumes GPT everywhere.
+  - It must hold exactly one partition, at least 1 GiB in size, and no others.
+  - That partition - not the whole disk - must be an LVM physical volume.
+  - The physical volume must belong to a new volume group named vgarchive.
+  - Stop there. Do not create any logical volume and do not put a filesystem
+    on anything: the archive team will do that themselves, and they want the
+    space untouched.
+  - The volume group rhel that this system runs on must be left exactly as it
+    is, with the same physical volumes and the same logical volumes it has now.
+
+  One thing about the lab, so you are not misled about what you are looking at.
+  This spare disk is a file on the host, attached as a loop device, which is
+  why it is called /dev/loopN and not /dev/sdb. On the exam it will be a real
+  second disk and every command in this task is identical either way. The one
+  difference that matters here: a loop device is not set up at boot, so this
+  particular disk - and everything you build on it - disappears when the
+  machine reboots. Nothing in this task is graded after a reboot for that
+  reason.

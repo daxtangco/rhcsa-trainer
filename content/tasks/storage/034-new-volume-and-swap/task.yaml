@@ -1,0 +1,48 @@
+id: storage/034-new-volume-and-swap
+title: New project filesystem and extra swap
+# Three of the four objectives below (fstab.uuid-label,
+# filesystems.create-mount, swap.nondestructive) carry chapters: [14] in
+# content/objectives.yaml; only storage.lvm.lv is chapter 15. The dominant
+# chapter wins, the same way selinux/019 declares 22 while also claiming
+# objectives from chapters 9 and 23.
+chapter: 14
+scope: exam-objective
+rhel: 9
+objectives:
+  - storage.lvm.lv
+  - storage.filesystems.create-mount
+  - storage.fstab.uuid-label
+  - storage.swap.nondestructive
+requires_concepts:
+  - storage.lvm-abstraction-stack
+  - storage.mkfs-mount-persist
+  - storage.fstab-fields-and-uuid
+  - storage.swap-activation-and-priority
+  - storage.extents-and-size-syntax
+difficulty: 3
+# Four separate pieces of work (volume, filesystem, persistent mount, swap).
+# 900s is the pace a candidate who knows the commands actually needs; the
+# thinking time is in choosing UUID/LABEL over the device name.
+time_budget: 900
+weight: high
+editions: [r9, r10]
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  The analytics team is getting its own storage on this host. The directory
+  /srv/projects already exists and is still empty.
+
+  - Give /srv/projects a filesystem of its own, at least 4 GiB, taken from the
+    free space that is already inside the volume group. It must be ext4, not
+    the system default filesystem.
+  - /srv/projects must be mounted at boot, and the boot configuration must
+    identify the filesystem by UUID or by filesystem label. A /dev/... device
+    name is not acceptable here: these machines get disks added and removed,
+    and device names move when that happens.
+  - The host also needs at least 1 GiB more swap space than it has now. The
+    2 GiB of swap that is already in use must be left exactly as it is, and
+    must still be active when you are finished.
+  - Do not change /home or /var.
+
+  Everything must still be in place after a reboot.

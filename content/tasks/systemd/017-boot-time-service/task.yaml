@@ -9,6 +9,7 @@ objectives:
 requires_concepts:
   - systemd.enabled-vs-started
   - systemd.unit-file-anatomy
+  - systemd.targets-and-default
 difficulty: 3
 time_budget: 600
 weight: medium

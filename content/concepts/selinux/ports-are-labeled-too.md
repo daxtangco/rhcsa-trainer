@@ -8,8 +8,10 @@ prerequisites: [selinux.labels-now-vs-policy]
 ---
 SELinux does not only label files. TCP and UDP port numbers are labelled too,
 and a confined service may only bind a port whose type its policy allows.
-`httpd` is allowed `http_port_t`, which by default covers 80, 443, 8080 and a
-few others. Port 82 is not in that list.
+`httpd` is allowed `http_port_t`, which on a stock RHEL 9 policy covers tcp 80,
+81, 443, 488, 8008, 8009, 8443 and 9000. Port 82 is not in that list, and
+neither is 8080 — that one is `http_cache_port_t`, which `httpd` is also allowed
+to bind, so a proxy on 8080 works while a server on 82 does not.
 
 So this happens:
 

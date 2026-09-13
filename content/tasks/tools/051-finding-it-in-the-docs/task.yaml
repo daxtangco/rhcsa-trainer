@@ -1,0 +1,74 @@
+id: tools/051-finding-it-in-the-docs
+title: Answer six questions from this machine's own documentation
+# tools.man.documentation carries chapters: [2] in content/objectives.yaml and it
+# is the only objective this task claims, so there is nothing to arbitrate.
+chapter: 2
+scope: exam-objective
+rhel: 9
+objectives:
+  - tools.man.documentation
+requires_concepts:
+  - tools.finding-system-documentation
+  # The answers are typed into a file that already exists, so the student has to
+  # edit a text file rather than create one. That is the other card's subject and
+  # it is a genuine prerequisite here, not decoration.
+  - tools.text-editing-in-place
+# 2, not 3. There is no configuration to get right, nothing to enable, and no
+# second copy of anything to keep in step: six lookups and one text file. It is
+# above a 1 because three of the six are only answerable by reading what ships on
+# this machine - a command name nobody recalls, the case of a letter in an option,
+# and a file name that appears in no manual page - and a candidate who answers from
+# memory loses them. Every checkpoint has to pass, so losing one of the three is
+# losing the task. grade.sh's header names all six and says which way each falls.
+difficulty: 2
+time_budget: 900
+# The objective is identical in R10's table - same id, same wording, same chapter 2
+# (content/objectives-rhel10.yaml:81) - and man, info and /usr/share/doc have not
+# moved in thirty years. Durable core material (spec section 14.4).
+weight: high
+editions: [r9, r10]
+# Deliberately false. Every checkpoint reads one text file on a disk-backed
+# filesystem, so the verdict after a reboot would be a byte-for-byte repeat of the
+# verdict before it, bought with a reboot. reboot_check earns its cost when a
+# task's running state and its configured state can disagree - a service active
+# but not enabled, a mount that is not in fstab. Nothing here has such a pair:
+# there is no runtime state at all. tools/038 makes the same call for the same
+# reason.
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  Every answer below is written down somewhere on this machine. You are expected
+  to find them here rather than recall them: three of the six cannot be guessed,
+  and one of those is a pair of options that differ only in the case of a letter.
+
+  /home/student/doc-answers.txt already exists and belongs to you. It holds one
+  line per question in the form key=value, with every value blank. Fill in the
+  value after the "=". Keep the key names exactly as they are, keep one answer
+  per line, and put nothing else on the line.
+
+  That file is the only thing graded. Nothing looks at your shell history or at
+  how you found anything.
+
+  - path_walk_command: one command on this system has the one-line manual
+    description "follow a pathname until a terminal point is found". Record its
+    name.
+  - passwd_fifth_field: two manual pages are called passwd. One documents the
+    command; the other documents the format of the file /etc/passwd. The one
+    about the file lists the seven colon-separated fields of a line and gives
+    each field a name. Record the name it gives the FIFTH field.
+  - hwclock_long_option: hwclock has one function that sets the system clock
+    from the hardware clock, and a different function that does the reverse.
+    Record the long-form (--word) option of the one that sets the SYSTEM clock
+    from the HARDWARE clock.
+  - useradd_short_option: useradd can override a default that /etc/login.defs
+    sets - UID_MIN or PASS_MAX_DAYS, say - for one invocation only. Record the
+    single-letter option that does that, with its leading dash. useradd has two
+    options spelled with that letter, so the case of it is part of the answer.
+  - getopt_doc_file: the manual page for getopt says where the example scripts
+    shipped with getopt are installed. Go there and record the file name of the
+    (ba)sh example. The file name on its own is enough; a full path is also
+    accepted.
+  - df_info_node: the manual page for df ends by naming where df's full
+    documentation is kept on this machine, as a Texinfo node. Record that node
+    reference the way the page prints it.

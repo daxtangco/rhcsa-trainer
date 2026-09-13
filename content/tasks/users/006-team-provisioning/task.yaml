@@ -11,6 +11,8 @@ objectives:
 requires_concepts:
   - users.shadow-aging-fields
   - users.sudoers-and-wheel
+  - users.account-creation-defaults
+  - users.login-shells-and-su
 difficulty: 2
 time_budget: 600
 weight: high

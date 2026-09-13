@@ -12,6 +12,8 @@ requires_concepts:
   - selinux.labels-now-vs-policy
   - selinux.ports-are-labeled-too
   - net.firewalld-runtime-vs-permanent
+  - pkg.repos-and-dnf
+  - net.firewalld-zones
 difficulty: 4
 time_budget: 900
 weight: high

@@ -1,0 +1,65 @@
+id: tools/038-text-search-and-redirection
+title: Extract failed deploy logins into a report
+# Two of the three objectives sit in chapter 4 (grep and regular expressions,
+# create and edit text files); tools.shell.redirection sits in chapter 2.
+# chapter is a single integer, so it names the chapter the task is *filed*
+# under, which is the one its primary objective comes from - the same choice
+# sys/035-persistent-journal-and-schedule makes when it claims objectives from
+# chapters 12 and 13 and files itself under 13. The search is the primary
+# objective here: the redirection exists to put the search's two output streams
+# somewhere, and the editor exists to fix the file the search's findings feed.
+chapter: 4
+scope: exam-objective
+rhel: 9
+objectives:
+  - tools.text.grep
+  - tools.shell.redirection
+  - tools.editor.text-files
+requires_concepts:
+  - tools.text-grep-and-anchors
+  - tools.redirection-and-streams
+  - tools.text-editing-in-place
+difficulty: 3
+time_budget: 600
+# All three objectives survive into R10's table unchanged, with the same
+# chapters and the same wording (content/objectives-rhel10.yaml), so this is
+# durable core material (spec section 14.4).
+weight: high
+editions: [r9, r10]
+# Deliberately false. Everything this task asks for is a file on a disk-backed
+# filesystem, so a reboot cannot undo any of it: the verdict after a reboot
+# would be a byte-for-byte repeat of the verdict before it, bought with a
+# reboot. reboot_check exists for answers whose runtime state and whose
+# configured state can disagree - a service that is active but not enabled, a
+# filesystem mounted but not in fstab - and this task has no such pair. There
+# is no persistence claim here for the second verdict to test.
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  The security team wants a login review from this host before the end of the
+  shift. The raw material is already on disk in /srv/rhcsa-review: two exported
+  log files, plus a quarantine directory your account is not allowed to read.
+  Work in /home/student/login-review, which already exists and belongs to you.
+
+  - Produce /home/student/login-review/failed-deploy.log holding every record in
+    the two exported log files that is a FAILED login for the account deploy,
+    and nothing else. The exports also hold failed logins for other accounts
+    whose names begin with "deploy", successful logins for deploy, and lines
+    that mention deploy somewhere other than the account field - none of those
+    belong in the report. One line per record; a filename or line-number prefix
+    added by the tool you search with is fine.
+  - Point the search at the whole of /srv/rhcsa-review, not only at the files
+    your account can read. It will have something to say about the part it
+    cannot read, and what it says must end up in
+    /home/student/login-review/search-errors.log, and must not end up in the
+    report.
+  - Leave the two exported log files exactly as you found them, byte for byte.
+  - /home/student/login-review/watchlist.txt is wrong and has to be corrected.
+    When you are finished it must hold exactly these four lines, in this order,
+    and nothing else:
+
+        # nightly login review watchlist - one account name per line
+        deploy
+        deploy_svc
+        root

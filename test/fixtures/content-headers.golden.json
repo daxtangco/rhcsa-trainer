@@ -1,5 +1,746 @@
 [
   {
+    "file": "tasks/containers/030-container-web-service/antisolutions/01-ran-it-by-hand.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "page-served@post",
+          "unit-boot-wanted@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/030-container-web-service/antisolutions/02-enabled-but-no-linger.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "linger-enabled@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/030-container-web-service/antisolutions/03-bind-mount-without-z.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "page-served@both",
+          "selinux-label@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/030-container-web-service/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "content-mounted@both",
+          "linger-enabled@both",
+          "page-served@both",
+          "rootless-owner@both",
+          "selinux-label@both",
+          "unit-boot-wanted@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "selinux-enforcing"
+        ]
+      }
+    ],
+    "emitted": [
+      "content-mounted",
+      "linger-enabled",
+      "page-served",
+      "rootless-owner",
+      "selinux-enforcing",
+      "selinux-label",
+      "unit-boot-wanted"
+    ]
+  },
+  {
+    "file": "tasks/containers/031-build-and-inspect-image/antisolutions/01-tagged-latest.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "default-cmd-prints-stamp@both",
+          "derived-from-base@both",
+          "derived-image-tagged@both",
+          "image-label@both",
+          "stamp-file-baked@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/031-build-and-inspect-image/antisolutions/02-stamp-only-at-run-time.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "stamp-file-baked@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/031-build-and-inspect-image/antisolutions/03-recorded-the-new-image-id.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "facts-image-id@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/031-build-and-inspect-image/antisolutions/04-selinux-turned-off.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "selinux-enforcing@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/031-build-and-inspect-image/antisolutions/05-label-on-the-container.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "image-label@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/031-build-and-inspect-image/antisolutions/06-entrypoint-kept-the-inherited-cmd.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "default-cmd-prints-stamp@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/031-build-and-inspect-image/antisolutions/07-built-on-ubi-minimal.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "derived-from-base@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/containers/031-build-and-inspect-image/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "base-image-present@both",
+          "containerfile-authored@both",
+          "default-cmd-prints-stamp@both",
+          "derived-from-base@both",
+          "derived-image-tagged@both",
+          "facts-default-cmd@both",
+          "facts-image-id@both",
+          "image-label@both",
+          "stamp-file-baked@both"
+        ]
+      }
+    ],
+    "emitted": [
+      "base-image-present",
+      "containerfile-authored",
+      "default-cmd-prints-stamp",
+      "derived-from-base",
+      "derived-image-tagged",
+      "facts-default-cmd",
+      "facts-image-id",
+      "image-label",
+      "selinux-enforcing",
+      "stamp-file-baked"
+    ]
+  },
+  {
+    "file": "tasks/files/033-shared-group-directory/antisolutions/01-umask-in-the-current-shell.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "umask-dana@both",
+          "umask-erik@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/033-shared-group-directory/antisolutions/02-tmpfs-over-the-directory.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "content-shared@post",
+          "dir-group-rwx@post",
+          "dir-group@post",
+          "dir-no-other@post",
+          "dir-setgid@post",
+          "dir-sticky@post"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/033-shared-group-directory/antisolutions/03-mode-2775.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "dir-no-other@both",
+          "dir-sticky@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/033-shared-group-directory/antisolutions/04-recreated-the-directory.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "content-preserved@both",
+          "content-shared@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/033-shared-group-directory/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "content-shared@both",
+          "dir-group-rwx@both",
+          "dir-group@both",
+          "dir-no-other@both",
+          "dir-setgid@both",
+          "dir-sticky@both",
+          "umask-dana@both",
+          "umask-erik@both"
+        ]
+      }
+    ],
+    "emitted": [
+      "content-preserved",
+      "content-shared",
+      "dir-group",
+      "dir-group-rwx",
+      "dir-no-other",
+      "dir-setgid",
+      "dir-sticky",
+      "umask-dana",
+      "umask-erik"
+    ]
+  },
+  {
+    "file": "tasks/files/036-links-and-relocation/antisolutions/01-symlink-for-current.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "current-hardlink@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/036-links-and-relocation/antisolutions/02-hardlink-into-review.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "review-symlink@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/036-links-and-relocation/antisolutions/03-relative-symlink-from-wrong-directory.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "review-resolves@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/036-links-and-relocation/antisolutions/04-glob-copy-loses-attributes.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "archive-attrs@both",
+          "archive-symlink@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/036-links-and-relocation/antisolutions/05-copied-not-moved.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "moved-in-place@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/036-links-and-relocation/antisolutions/06-archived-by-moving.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "current-hardlink@both",
+          "moved-in-place@both",
+          "originals-intact@both",
+          "review-resolves@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/files/036-links-and-relocation/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "archive-attrs@both",
+          "archive-symlink@both",
+          "current-hardlink@both",
+          "incoming-gone@both",
+          "junk-gone@both",
+          "moved-in-place@both",
+          "review-resolves@both",
+          "review-symlink@both"
+        ]
+      }
+    ],
+    "emitted": [
+      "archive-attrs",
+      "archive-symlink",
+      "current-hardlink",
+      "incoming-gone",
+      "junk-gone",
+      "moved-in-place",
+      "originals-intact",
+      "review-resolves",
+      "review-symlink"
+    ]
+  },
+  {
+    "file": "tasks/net/044-hostname-and-name-resolution/antisolutions/01-transient-hostname-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "hostname-live@post",
+          "hostname-static@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/044-hostname-and-name-resolution/antisolutions/02-resolv-conf-edited-by-hand.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "dns-nameserver@both",
+          "dns-search@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/044-hostname-and-name-resolution/antisolutions/03-short-name-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "self-hosts-entry@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/044-hostname-and-name-resolution/antisolutions/04-peer-columns-reversed.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "peer-resolves@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/044-hostname-and-name-resolution/antisolutions/05-hosts-file-replaced.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "hosts-localhost@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/044-hostname-and-name-resolution/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "dns-nameserver@both",
+          "dns-search@both",
+          "hostname-live@both",
+          "hostname-static@both",
+          "peer-resolves@both",
+          "self-hosts-entry@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "network-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "dns-nameserver",
+      "dns-search",
+      "hostname-live",
+      "hostname-static",
+      "hosts-localhost",
+      "network-intact",
+      "peer-resolves",
+      "self-hosts-entry"
+    ]
+  },
+  {
+    "file": "tasks/net/045-firewall-restricted-service/antisolutions/01-runtime-only-rich-rule.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "source-allowed-permanent@both",
+          "source-allowed-runtime@post"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/045-firewall-restricted-service/antisolutions/02-opened-to-everyone.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "not-open-to-all-permanent@both",
+          "not-open-to-all-runtime@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/045-firewall-restricted-service/antisolutions/03-rule-in-the-wrong-zone.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "source-allowed-permanent@both",
+          "source-allowed-runtime@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/045-firewall-restricted-service/antisolutions/04-permanent-without-reload.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "source-allowed-runtime@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/045-firewall-restricted-service/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "source-allowed-permanent@both",
+          "source-allowed-runtime@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "service-answers",
+          "ssh-permitted"
+        ]
+      }
+    ],
+    "emitted": [
+      "not-open-to-all-permanent",
+      "not-open-to-all-runtime",
+      "service-answers",
+      "source-allowed-permanent",
+      "source-allowed-runtime",
+      "ssh-permitted"
+    ]
+  },
+  {
+    "file": "tasks/net/046-key-based-ssh-login/antisolutions/01-group-writable-ssh-dir.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "deploy-key-login@both",
+          "deploy-key-perms@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/046-key-based-ssh-login/antisolutions/02-private-key-in-authorized-keys.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "deploy-authorized-key@both",
+          "deploy-key-login@both",
+          "deploy-no-private-key@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/046-key-based-ssh-login/antisolutions/03-passphrase-protected-key.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "deploy-key-login@both",
+          "student-keypair@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/046-key-based-ssh-login/antisolutions/04-moved-from-root-home-then-setenforce.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "deploy-key-context@both",
+          "deploy-key-login@post",
+          "selinux-enforcing@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/net/046-key-based-ssh-login/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "deploy-authorized-key@both",
+          "deploy-key-context@both",
+          "deploy-key-login@both",
+          "deploy-key-perms@both",
+          "student-keypair@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "sshd-key-auth-intact",
+          "student-channel-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "deploy-authorized-key",
+      "deploy-key-context",
+      "deploy-key-login",
+      "deploy-key-perms",
+      "deploy-no-private-key",
+      "selinux-enforcing",
+      "sshd-key-auth-intact",
+      "student-channel-intact",
+      "student-keypair"
+    ]
+  },
+  {
+    "file": "tasks/pkg/049-packages-and-repositories/antisolutions/01-only-what-a-repository-offered.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "telnet-installed@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/pkg/049-packages-and-repositories/antisolutions/02-gpgcheck-turned-off.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "appstream-repo-gpgcheck@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/pkg/049-packages-and-repositories/antisolutions/03-repository-disabled-and-forced-on.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "appstream-repo-defined@both",
+          "appstream-repo-gpgcheck@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/pkg/049-packages-and-repositories/antisolutions/04-baseurl-that-points-nowhere.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "appstream-repo-defined@both",
+          "appstream-repo-gpgcheck@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/pkg/049-packages-and-repositories/antisolutions/05-payload-extracted-not-installed.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "telnet-installed@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/pkg/049-packages-and-repositories/antisolutions/06-tidied-the-repository-file.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "baseos-repo-intact@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/pkg/049-packages-and-repositories/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "appstream-repo-defined@both",
+          "appstream-repo-gpgcheck@both",
+          "telnet-installed@both",
+          "tree-installed@both",
+          "whois-installed@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "control-packages-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "appstream-repo-defined",
+      "appstream-repo-gpgcheck",
+      "baseos-repo-intact",
+      "control-packages-intact",
+      "telnet-installed",
+      "tree-installed",
+      "whois-installed"
+    ]
+  },
+  {
     "file": "tasks/selinux/019-httpd-alt-port/antisolutions/01-chcon-only.sh",
     "headers": [
       {
@@ -97,6 +838,190 @@
     ]
   },
   {
+    "file": "tasks/selinux/032-selinux-denial-triage/antisolutions/01-chcon-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "context-policy@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/032-selinux-denial-triage/antisolutions/02-runtime-boolean-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "boolean-now@post",
+          "boolean-persistent@both",
+          "report-served@post"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/032-selinux-denial-triage/antisolutions/03-permissive-and-forgot.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "mode-enforcing-now@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/032-selinux-denial-triage/antisolutions/04-fcontext-without-restorecon.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "context-now@both",
+          "report-served@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/032-selinux-denial-triage/antisolutions/05-moved-to-cgi-bin.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "context-now@both",
+          "context-policy@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/032-selinux-denial-triage/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "boolean-now@both",
+          "boolean-persistent@both",
+          "context-now@both",
+          "context-policy@both",
+          "report-served@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "mode-enforcing-config"
+        ]
+      }
+    ],
+    "emitted": [
+      "boolean-now",
+      "boolean-persistent",
+      "context-now",
+      "context-policy",
+      "mode-enforcing-config",
+      "mode-enforcing-now",
+      "report-served"
+    ]
+  },
+  {
+    "file": "tasks/selinux/050-port-labels-and-modes/antisolutions/01-setenforce-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "mode-enforcing-config@both",
+          "mode-enforcing-now@post"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/050-port-labels-and-modes/antisolutions/02-config-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "mode-enforcing-now@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/050-port-labels-and-modes/antisolutions/03-permissive-domain.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "port-labeled@both",
+          "syslogd-confined@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/050-port-labels-and-modes/antisolutions/04-wrong-port-type.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "port-labeled@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/050-port-labels-and-modes/antisolutions/05-wrong-protocol.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "port-labeled@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/selinux/050-port-labels-and-modes/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "mode-enforcing-config@both",
+          "mode-enforcing-now@both",
+          "port-labeled@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "kernel-cmdline-clean",
+          "syslog-default-port-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "kernel-cmdline-clean",
+      "mode-enforcing-config",
+      "mode-enforcing-now",
+      "port-labeled",
+      "syslog-default-port-intact",
+      "syslogd-confined"
+    ]
+  },
+  {
     "file": "tasks/storage/014-grow-home-lv/antisolutions/01-forgot-growfs.sh",
     "headers": [
       {
@@ -158,6 +1083,564 @@
       "lv-home-size",
       "persist-config",
       "var-intact"
+    ]
+  },
+  {
+    "file": "tasks/storage/034-new-volume-and-swap/antisolutions/01-mounted-by-device-path.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "projects-by-uuid@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/034-new-volume-and-swap/antisolutions/02-swapon-without-fstab.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "swap-added@post",
+          "swap-persistent@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/034-new-volume-and-swap/antisolutions/03-formatted-never-persisted.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "projects-by-uuid@both",
+          "projects-fstype@post",
+          "projects-lv-size@post",
+          "projects-mounted@post",
+          "projects-persistent@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/034-new-volume-and-swap/antisolutions/04-recycled-the-existing-swap.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "old-swap-intact@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/034-new-volume-and-swap/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "projects-by-uuid@both",
+          "projects-fstype@both",
+          "projects-lv-size@both",
+          "projects-mounted@both",
+          "projects-persistent@both",
+          "swap-added@both",
+          "swap-persistent@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "home-intact",
+          "var-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "home-intact",
+      "old-swap-intact",
+      "projects-by-uuid",
+      "projects-fstype",
+      "projects-lv-size",
+      "projects-mounted",
+      "projects-persistent",
+      "swap-added",
+      "swap-persistent",
+      "var-intact"
+    ]
+  },
+  {
+    "file": "tasks/storage/042-partition-and-volume-group/antisolutions/01-pvcreate-whole-disk.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "disk-gpt@both",
+          "part-single@both",
+          "part-size@both",
+          "pv-on-partition@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/042-partition-and-volume-group/antisolutions/02-msdos-label.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "disk-gpt@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/042-partition-and-volume-group/antisolutions/03-no-volume-group.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "vg-created@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/042-partition-and-volume-group/antisolutions/04-added-to-rhel.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "rhel-intact@both",
+          "vg-created@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/042-partition-and-volume-group/antisolutions/05-leftover-partition.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "part-single@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/042-partition-and-volume-group/antisolutions/06-lvcreate-and-mkfs.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "space-untouched@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/042-partition-and-volume-group/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "disk-gpt@both",
+          "part-single@both",
+          "part-size@both",
+          "pv-on-partition@both",
+          "vg-created@both"
+        ]
+      }
+    ],
+    "emitted": [
+      "disk-gpt",
+      "part-single",
+      "part-size",
+      "pv-on-partition",
+      "rhel-intact",
+      "space-untouched",
+      "vg-created"
+    ]
+  },
+  {
+    "file": "tasks/storage/043-nfs-and-autofs/antisolutions/01-reports-mounted-by-hand.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "reports-mounted@post",
+          "reports-persistent@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/043-nfs-and-autofs/antisolutions/02-autofs-started-not-enabled.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "archive-automounted@post",
+          "archive-via-autofs@post",
+          "autofs-enabled@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/043-nfs-and-autofs/antisolutions/03-reports-bind-mounted.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "reports-mounted@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/043-nfs-and-autofs/antisolutions/04-oldshare-unmounted-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "oldshare-released@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/043-nfs-and-autofs/antisolutions/05-autofs-enabled-not-started.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "archive-automounted@pre",
+          "archive-via-autofs@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/storage/043-nfs-and-autofs/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "archive-automounted@both",
+          "archive-via-autofs@both",
+          "autofs-enabled@both",
+          "oldshare-released@both",
+          "reports-mounted@both",
+          "reports-persistent@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "export-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "archive-automounted",
+      "archive-via-autofs",
+      "autofs-enabled",
+      "export-intact",
+      "oldshare-released",
+      "reports-mounted",
+      "reports-persistent"
+    ]
+  },
+  {
+    "file": "tasks/sys/035-persistent-journal-and-schedule/antisolutions/01-storage-set-but-never-applied.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "journal-history@both",
+          "journal-persistent@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/035-persistent-journal-and-schedule/antisolutions/02-crond-started-not-enabled.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "crond-active@post",
+          "crond-enabled@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/035-persistent-journal-and-schedule/antisolutions/03-cron-d-missing-user-field.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "cron-schedule@both",
+          "cron-user@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/035-persistent-journal-and-schedule/antisolutions/04-schedule-hourly-not-2330.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "cron-schedule@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/035-persistent-journal-and-schedule/antisolutions/05-report-not-filtered.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "extract-filtered@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/035-persistent-journal-and-schedule/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "cron-schedule@both",
+          "cron-user@both",
+          "crond-active@both",
+          "crond-enabled@both",
+          "extract-file@both",
+          "extract-filtered@both",
+          "journal-history@both",
+          "journal-persistent@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "journald-active"
+        ]
+      }
+    ],
+    "emitted": [
+      "cron-schedule",
+      "cron-user",
+      "crond-active",
+      "crond-enabled",
+      "extract-file",
+      "extract-filtered",
+      "journal-history",
+      "journal-persistent",
+      "journald-active"
+    ]
+  },
+  {
+    "file": "tasks/sys/039-process-signals-and-priority/antisolutions/01-renice-only-no-config.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "index-nice-config@both",
+          "index-nice-running@post"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/039-process-signals-and-priority/antisolutions/02-sigkill-the-runaway.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "purge-graceful@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/039-process-signals-and-priority/antisolutions/03-overbroad-pkill-pattern.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "index-alive@pre",
+          "index-nice-running@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/039-process-signals-and-priority/antisolutions/04-nice-in-unit-section.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "index-nice-config@both",
+          "index-nice-running@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/039-process-signals-and-priority/antisolutions/05-dropin-never-applied.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "index-nice-running@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/039-process-signals-and-priority/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "index-nice-config@both",
+          "index-nice-running@both",
+          "purge-graceful@pre",
+          "purge-stopped@pre"
+        ]
+      }
+    ],
+    "emitted": [
+      "index-alive",
+      "index-nice-config",
+      "index-nice-running",
+      "purge-graceful",
+      "purge-stopped"
+    ]
+  },
+  {
+    "file": "tasks/sys/040-time-and-tuning/antisolutions/01-runtime-only-source.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "chrony-source-live@post",
+          "chrony-source-persistent@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/040-time-and-tuning/antisolutions/02-config-edited-after-start.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "chrony-source-live@pre"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/040-time-and-tuning/antisolutions/03-tuned-started-not-enabled.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "tuned-enabled@both",
+          "tuned-profile@post"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/040-time-and-tuning/antisolutions/04-stock-pool-left-in-place.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "chrony-sole-source@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/040-time-and-tuning/antisolutions/05-local-rtc-instead-of-timezone.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "rtc-utc@both",
+          "timezone-set@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/sys/040-time-and-tuning/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "chrony-sole-source@both",
+          "chrony-source-live@both",
+          "chrony-source-persistent@both",
+          "chronyd-active@both",
+          "chronyd-enabled@both",
+          "timezone-set@both",
+          "tuned-enabled@both",
+          "tuned-profile@both"
+        ]
+      }
+    ],
+    "emitted": [
+      "chrony-sole-source",
+      "chrony-source-live",
+      "chrony-source-persistent",
+      "chronyd-active",
+      "chronyd-enabled",
+      "rtc-utc",
+      "timezone-set",
+      "tuned-enabled",
+      "tuned-profile"
     ]
   },
   {
@@ -223,6 +1706,498 @@
       "stamp-effect",
       "stamp-enabled",
       "unit-verifies"
+    ]
+  },
+  {
+    "file": "tasks/systemd/048-targets-and-clean-shutdown/antisolutions/01-cancelled-but-still-armed.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "no-reboot-pending@post",
+          "rearm-unit-disabled@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/systemd/048-targets-and-clean-shutdown/antisolutions/02-changed-the-default-instead.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "boot-arg-pinned@both",
+          "default-target-unchanged@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/systemd/048-targets-and-clean-shutdown/antisolutions/03-isolated-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "boot-arg-pinned@both",
+          "graphical-target-active@post"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/systemd/048-targets-and-clean-shutdown/antisolutions/04-edited-default-grub-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "boot-arg-pinned@both",
+          "graphical-target-active@post"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/systemd/048-targets-and-clean-shutdown/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "boot-arg-pinned@both",
+          "graphical-target-active@both",
+          "no-reboot-pending@both",
+          "rearm-unit-disabled@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "sshd-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "boot-arg-pinned",
+      "default-target-unchanged",
+      "graphical-target-active",
+      "no-reboot-pending",
+      "rearm-unit-disabled",
+      "sshd-intact"
+    ]
+  },
+  {
+    "file": "tasks/tools/037-report-script/antisolutions/01-read-drops-last-line.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "unterminated-line@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/037-report-script/antisolutions/02-hardcoded-answers.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "unseen-input@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/037-report-script/antisolutions/03-every-account-is-a-user.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "mixed-list@both",
+          "unseen-input@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/037-report-script/antisolutions/04-no-argument-check.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "no-arg-usage@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/037-report-script/antisolutions/05-boundary-off-by-one.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "uid-boundary@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/037-report-script/antisolutions/06-blank-line-not-skipped.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "blank-lines@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/037-report-script/antisolutions/07-empty-list-is-an-error.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "empty-list@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/037-report-script/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "blank-lines@both",
+          "empty-list@both",
+          "mixed-list@both",
+          "no-arg-usage@both",
+          "script-executable@both",
+          "uid-boundary@both",
+          "unseen-input@both",
+          "unterminated-line@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "accounts-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "accounts-intact",
+      "blank-lines",
+      "empty-list",
+      "mixed-list",
+      "no-arg-usage",
+      "script-executable",
+      "uid-boundary",
+      "unseen-input",
+      "unterminated-line"
+    ]
+  },
+  {
+    "file": "tasks/tools/038-text-search-and-redirection/antisolutions/01-stdout-only.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "errors-captured@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/038-text-search-and-redirection/antisolutions/02-both-streams-one-file.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "errors-captured@both",
+          "report-clean@both",
+          "report-precise@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/038-text-search-and-redirection/antisolutions/03-pattern-too-greedy.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "report-precise@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/038-text-search-and-redirection/antisolutions/04-clobbered-watchlist.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "watchlist-exact@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/038-text-search-and-redirection/antisolutions/05-tidied-the-source-logs.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "logs-unmodified@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/038-text-search-and-redirection/antisolutions/06-searched-one-export.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "report-complete@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/038-text-search-and-redirection/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "errors-captured@both",
+          "report-clean@both",
+          "report-complete@both",
+          "report-precise@both",
+          "watchlist-exact@both"
+        ]
+      }
+    ],
+    "emitted": [
+      "errors-captured",
+      "logs-unmodified",
+      "report-clean",
+      "report-complete",
+      "report-precise",
+      "watchlist-exact"
+    ]
+  },
+  {
+    "file": "tasks/tools/047-archive-and-transfer/antisolutions/01-extracted-without-preserving-modes.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "unpacked-mode-preserved@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/047-archive-and-transfer/antisolutions/02-bzip2-payload-under-a-gz-name.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "archive-is-gzip@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/047-archive-and-transfer/antisolutions/03-copied-the-tree-instead-of-archiving-it.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "archive-holds-tree@both",
+          "archive-is-gzip@both",
+          "archive-present@both",
+          "unpacked-mode-preserved@both",
+          "unpacked-mtime-preserved@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/047-archive-and-transfer/antisolutions/04-unpacked-with-sudo-so-backupop-owns-nothing.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "unpacked-owned-by-backupop@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/047-archive-and-transfer/antisolutions/05-cleared-the-source-after-the-handover.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "source-tree-intact@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/047-archive-and-transfer/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "archive-holds-tree@both",
+          "archive-is-gzip@both",
+          "archive-present@both",
+          "transfer-over-ssh@both",
+          "unpacked-mode-preserved@both",
+          "unpacked-mtime-preserved@both",
+          "unpacked-owned-by-backupop@both",
+          "unpacked-tree-present@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "student-channel-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "archive-holds-tree",
+      "archive-is-gzip",
+      "archive-present",
+      "source-tree-intact",
+      "student-channel-intact",
+      "transfer-over-ssh",
+      "unpacked-mode-preserved",
+      "unpacked-mtime-preserved",
+      "unpacked-owned-by-backupop",
+      "unpacked-tree-present"
+    ]
+  },
+  {
+    "file": "tasks/tools/051-finding-it-in-the-docs/antisolutions/01-lowercase-k.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "useradd-override-option@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/051-finding-it-in-the-docs/antisolutions/02-clock-wrong-direction.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "hwclock-function-option@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/051-finding-it-in-the-docs/antisolutions/03-placeholder-left-in.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "df-info-node@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/051-finding-it-in-the-docs/antisolutions/04-answered-from-memory.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "command-by-description@both",
+          "doc-example-script@both",
+          "passwd-field-name@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/051-finding-it-in-the-docs/antisolutions/05-renamed-a-key.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "passwd-field-name@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/tools/051-finding-it-in-the-docs/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "command-by-description@both",
+          "df-info-node@both",
+          "doc-example-script@both",
+          "hwclock-function-option@both",
+          "passwd-field-name@both",
+          "useradd-override-option@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "documentation-installed",
+          "man-index-usable"
+        ]
+      }
+    ],
+    "emitted": [
+      "command-by-description",
+      "df-info-node",
+      "doc-example-script",
+      "documentation-installed",
+      "hwclock-function-option",
+      "man-index-usable",
+      "passwd-field-name",
+      "useradd-override-option"
     ]
   },
   {
@@ -349,6 +2324,83 @@
       "group-gid",
       "student-intact",
       "sudo-devops"
+    ]
+  },
+  {
+    "file": "tasks/users/041-switching-users-and-prompt/antisolutions/01-prompt-in-bash-profile.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "prompt-nonlogin@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/users/041-switching-users-and-prompt/antisolutions/02-prompt-for-every-account.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "other-prompts-unchanged@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/users/041-switching-users-and-prompt/antisolutions/03-prompt-in-skel.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "prompt-login@both",
+          "prompt-nonlogin@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/users/041-switching-users-and-prompt/antisolutions/04-plaintext-in-the-hash-field.sh",
+    "headers": [
+      {
+        "kind": "expect-fail",
+        "declared": [
+          "login-password@both"
+        ]
+      }
+    ],
+    "emitted": []
+  },
+  {
+    "file": "tasks/users/041-switching-users-and-prompt/grade.sh",
+    "headers": [
+      {
+        "kind": "baseline-fail",
+        "declared": [
+          "login-password@both",
+          "login-shell@both",
+          "prompt-login@both",
+          "prompt-nonlogin@both"
+        ]
+      },
+      {
+        "kind": "unprobed-invariant",
+        "declared": [
+          "student-login-intact"
+        ]
+      }
+    ],
+    "emitted": [
+      "login-password",
+      "login-shell",
+      "other-prompts-unchanged",
+      "prompt-login",
+      "prompt-nonlogin",
+      "student-login-intact"
     ]
   }
 ]

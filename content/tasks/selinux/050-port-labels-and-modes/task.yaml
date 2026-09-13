@@ -1,0 +1,91 @@
+id: selinux/050-port-labels-and-modes
+title: Label the log receiver's port and put SELinux back in enforcing mode
+# Both objectives carry chapters: [22] in content/objectives.yaml, so there is
+# nothing to arbitrate.
+chapter: 22
+scope: exam-objective
+rhel: 9
+# Both ids are on the uncovered list today, and neither is uncovered for lack of
+# content (docs/coverage-phase-1.md:28-39):
+#
+#   - selinux.ports.labels is exercised by selinux/019-httpd-alt-port, which is
+#     scope: instrumental and therefore confers no coverage. This task is not a
+#     second 019: 019 labels tcp/82 http_port_t as one step of building an Apache
+#     site, and its port checkpoint is one of seven. Here the port is the subject,
+#     the protocol is udp rather than tcp, the type is syslogd_port_t, and the
+#     grader reads the policy rather than curling a page.
+#   - selinux.modes.enforcing-permissive is *guarded* by
+#     selinux/032-selinux-denial-triage - the mode is checked now and at next boot
+#     - but not taught there, because the student sets no mode: both mode
+#     checkpoints already pass on a clean guest and stay green by being left
+#     alone. 032's task.yaml says so in its own words and deliberately does not
+#     claim the id. This is the task where the student really does set the mode:
+#     setup.sh stages a host that is permissive now AND permissive at the next
+#     boot, so both halves are goal checkpoints that must fail at baseline.
+objectives:
+  - selinux.ports.labels
+  - selinux.modes.enforcing-permissive
+requires_concepts:
+  # The port half.
+  - selinux.ports-are-labeled-too
+  # The mode half. Until this task existed, no task named this card: it was
+  # reachable only as a prerequisite of another card. Naming it here is the point
+  # - the card is what teaches "the mode is two questions", and this is the task
+  # that asks both of them.
+  - selinux.modes-now-and-at-next-boot
+  # Prerequisite of both cards above, and load-bearing on its own: the reason the
+  # port half is graded from the policy database rather than from "the daemon
+  # bound the port" is the same now-versus-policy distinction.
+  - selinux.labels-now-vs-policy
+difficulty: 3
+time_budget: 600
+# Two commands' worth of work if you know them and an afternoon if you do not,
+# which is what makes it a 3 rather than a 2: the mode half has two places to
+# change and only one of them is visible from `getenforce`, and the port half
+# fails silently in three different ways (wrong protocol, wrong type, `-m` on a
+# port that is not defined yet).
+#
+# High weight: both ids appear in RHEL 10's Table 1 with identical wording in the
+# same chapter (content/objectives-rhel10.yaml:266-268 and 277-279), and "SELinux
+# is in permissive mode because somebody was troubleshooting" is one of the most
+# common real findings on a RHEL host.
+weight: high
+editions: [r9, r10]
+# Both halves are "does it survive" questions and the two commonest wrong answers
+# are exactly the ones only a reboot separates from a right one:
+#
+#   - `setenforce 1` and nothing else: enforcing now, permissive at the next boot.
+#     mode-enforcing-now is green in verdict A and red in verdict B, which is the
+#     regression signature antisolutions/01 exists to produce.
+#   - editing /etc/selinux/config and nothing else: correct at the next boot,
+#     still permissive right now. That is the mirror image, and verdict B is what
+#     proves the checkpoint that catches it in A was not simply wrong
+#     (antisolutions/02).
+#
+# The port half persists by construction - the policy database *is* the state -
+# and the reboot is what proves that claim rather than assuming it.
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  A colleague spent last Thursday getting this host to receive syslog messages
+  over the network. The receiver is already configured: rsyslog is set up to
+  listen on UDP port 5514 by the drop-in /etc/rsyslog.d/rhcsa-log-receiver.conf,
+  which is deployed by configuration management and is correct.
+
+  It would not listen until they put SELinux in permissive mode, and that is how
+  they left the host - permissive right now, and permissive at the next boot too.
+  Finish the job properly.
+
+  - UDP port 5514 must carry the same SELinux port type that this host's system
+    log service already uses for its standard 514/udp port, and it must still
+    carry it after a reboot.
+  - SELinux must be in enforcing mode right now.
+  - /etc/selinux/config must select enforcing mode, so the host still comes up
+    enforcing after a reboot.
+  - Do not exempt the log service from the policy. Making the port acceptable is
+    the fix; making the daemon unconfined is not.
+  - Leave the port definitions that shipped with the policy alone: 514/udp keeps
+    the type it already has.
+  - Do not change the kernel command line, and do not edit
+    /etc/rsyslog.d/rhcsa-log-receiver.conf.

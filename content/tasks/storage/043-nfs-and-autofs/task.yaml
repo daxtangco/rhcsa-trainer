@@ -1,0 +1,62 @@
+id: storage/043-nfs-and-autofs
+title: Mount the report share persistently and automount the archive
+# Both objectives carry chapters: [24] in content/objectives.yaml, so there is no
+# chapter to choose between - unlike sys/040, which had to pick one. Filed under
+# the chapter both of its objectives sit in.
+chapter: 24
+scope: exam-objective
+rhel: 9
+objectives:
+  - storage.nfs.mount
+  - storage.autofs.configure
+requires_concepts:
+  - storage.nfs-client-mounts
+  - storage.autofs-maps
+  - storage.fstab-fields-and-uuid
+  - systemd.enabled-vs-started
+difficulty: 4
+# Three requirements, two of them persistence questions, and autofs needs two
+# files that must agree with each other. 20 minutes is what this costs a
+# candidate who has done it once before; a first attempt spends most of it
+# working out why /nfsdata/archive says "No such file or directory".
+time_budget: 1200
+# Both objectives are on Red Hat's RHEL 10 list with identical wording
+# (content/objectives-rhel10.yaml:180 and :183), and the tools are unchanged -
+# mount, /etc/fstab, /etc/auto.master, automount. Nothing here is R9-only.
+weight: high
+editions: [r9, r10]
+# True, and both halves of the task earn it.
+#
+# An NFS mount that exists only because somebody typed `mount` is the single most
+# common wrong answer to "make this share available", and it is invisible until
+# the machine comes back. So is an autofs map written into the right files by a
+# service that was started and never enabled. reports-mounted, archive-via-autofs
+# and archive-automounted therefore change meaning between the two verdicts:
+# before the reboot they say the student made it work, and after it they say the
+# machine makes it work on its own. oldshare-released is the same question from
+# the other side - an unmount that was never written down comes back.
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  This host is standing in for a remote file server. There is only one machine in
+  this lab, so it exports directories over NFS to itself; every change you make
+  below is nevertheless the real client-side work, and the server side is not
+  your problem.
+
+  The file server answers to the name nfsstore.lab.example.com and serves two
+  directories: /export/reports and /export/archive. The local directory /nfsdata
+  already exists and is empty.
+
+  - Make the server's /export/reports available on this host at /mnt/reports. It
+    must be mounted now, and it must be mounted again after a reboot without
+    anyone logging in to do it.
+  - Make the server's /export/archive reachable at /nfsdata/archive, mounted on
+    demand by autofs: the mount must happen when something uses that path, not
+    at boot. It must still behave that way after a reboot, again with nobody
+    logging in to start anything.
+  - The mount at /mnt/oldshare is left over from an earlier migration and is not
+    wanted any more. It must not be mounted, and it must not come back at the
+    next boot. Leaving the empty directory behind is fine.
+  - Leave the exports themselves alone: this host must still be serving both
+    /export/reports and /export/archive when you are finished.

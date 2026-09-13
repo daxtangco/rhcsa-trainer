@@ -1,0 +1,59 @@
+id: sys/039-process-signals-and-priority
+title: Stop the runaway job and de-prioritise the collector
+# Both objectives below carry chapters: [10] in content/objectives.yaml and in
+# content/objectives-rhel10.yaml, so there is no chapter to choose between - this
+# is chapter 10 in both editions. `chapter` is the book chapter the objectives
+# sit in, not a task number.
+chapter: 10
+scope: exam-objective
+rhel: 9
+objectives:
+  - sys.proc.kill
+  - sys.proc.scheduling
+requires_concepts:
+  - sys.proc-finding-the-hog
+  - sys.proc-signals-and-kill
+  - sys.proc-nice-and-priority
+  # The only place a "from now on, including after a reboot" nice value can
+  # live is the unit that starts the process, so a student who has never read a
+  # unit file cannot finish the second half of this task.
+  - systemd.unit-file-anatomy
+difficulty: 3
+time_budget: 600
+# Both objectives survive verbatim into R10's table, same chapter, same text.
+weight: high
+editions: [r9, r10]
+# True, and only because of the second half. `renice` on a running process is
+# not persistent, so the prompt asks for a nice value that holds "every time the
+# service starts from now on" - and the two nice checkpoints are re-checked
+# after the reboot against a service that systemd started by itself, which is
+# the only way to tell a drop-in from a renice.
+#
+# The judgement call is the first half. A killed process cannot be un-killed by
+# a reboot, and systemd's shutdown SIGTERM makes the runaway write its own
+# shutdown record on the way down, so an untouched machine passes both halves of
+# it in verdict B - which is why purge-stopped and purge-graceful are declared
+# `@pre` rather than pretending a reboot can prove something it cannot.
+# purge-graceful is still measured after the reboot rather than waved through:
+# SIGKILL leaves no record for any later shutdown to write, so it fails in both
+# verdicts (see grade.sh's section 1 and 2 comments).
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  Users say this host has felt sluggish since last night's maintenance window.
+  Two jobs from the lab's maintenance suite are running, and only one of them is
+  a problem.
+
+  - One process has been burning an entire CPU since that window. It is a
+    leftover: nothing depends on it, and it will never finish on its own. Find
+    it and stop it.
+  - Stop it politely. That job handles the default termination signal by writing
+    a line into /var/log/rhcsa-lab/purge-shutdown.log and exiting; that file
+    must exist when you are done. A process that is destroyed outright never
+    gets to write it.
+  - The other job is wanted. rhcsa-lab-metrics.service must still be running
+    when you are finished - not stopped, not failed.
+  - That collector must never compete with interactive work again. It has to run
+    with a nice value of 10: the process running right now, and every process
+    the service starts from here on, including after a reboot.

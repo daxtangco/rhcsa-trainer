@@ -1,0 +1,63 @@
+id: net/044-hostname-and-name-resolution
+title: Name this host and make the site's names resolve
+# net.hostname.resolution carries chapters: [8] in content/objectives.yaml and the
+# same in content/objectives-rhel10.yaml, so there is no chapter to choose
+# between. Chapter 8's own section heading is "Setting Up Hostname and Name
+# Resolution" (corpus/r9, exercise 8-4's trailing prose), which is this task.
+chapter: 8
+scope: exam-objective
+rhel: 9
+objectives:
+  - net.hostname.resolution
+requires_concepts:
+  - net.hostname-vs-resolution
+  - net.resolution-order-and-hosts
+  # Genuinely applies: the resolver half of this task is a change to a
+  # NetworkManager connection profile, and the card's "modify writes the profile
+  # and does not apply it" paragraph is the fact the DNS checkpoints rest on.
+  - net.nm-connections-are-the-config
+difficulty: 2
+time_budget: 600
+# The objective survives into R10's table with identical wording and the same
+# chapter (content/objectives-rhel10.yaml:225), and every tool involved -
+# hostnamectl, /etc/hosts, nmcli - is unchanged between the two. Weight is
+# medium rather than high because this is one small objective with one small
+# section behind it, not a chapter's worth of material like LVM or firewalld.
+weight: medium
+editions: [r9, r10]
+# True, and it is the point of the task rather than a formality. `hostname
+# <name>` sets the kernel's transient hostname and writes nothing; `hostnamectl
+# set-hostname <name>` writes /etc/hostname as well. The two are
+# indistinguishable until the machine comes back, which makes hostname-live the
+# cleanest persistence checkpoint in this bank: it passes in verdict A for the
+# transient answer and regresses in verdict B.
+# antisolutions/01-transient-hostname-only.sh is exactly that fixture.
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  This host has been re-purposed as the application server for the
+  lab.example.com site. It still answers to the name of the template it was
+  cloned from, and nothing on it knows any of the site's names yet.
+
+  You are working on this host over its only network interface, and its
+  addressing is not part of this job: do not change the interface's addresses,
+  its gateway or how it obtains them, do not take its connection down or
+  reactivate it, and do not restart NetworkManager.
+
+  - This host's name must be app1.lab.example.com, in that fully qualified
+    form. It must be the name the running system answers to now, and it must
+    still be that name after a reboot.
+  - The name app1.lab.example.com must resolve on this host, without asking any
+    name server, to the IPv4 address the host's interface currently has. The
+    short name app1 must resolve to that same address.
+  - The site's file server is filer1.lab.example.com, at 192.0.2.40. Both that
+    name and the short name filer1 must resolve to that address on this host.
+    No name server knows about it.
+  - The connection profile that configures this host's interface must record
+    192.168.70.2 as its DNS server and lab.example.com as its DNS search
+    domain, so that both are applied the next time the connection comes up.
+    Recording them in the profile is what is being asked for - you do not have
+    to make them take effect now, and a hand-edited /etc/resolv.conf does not
+    count, because it is a generated file.
+  - Leave the entries that map 127.0.0.1 and ::1 to localhost alone.

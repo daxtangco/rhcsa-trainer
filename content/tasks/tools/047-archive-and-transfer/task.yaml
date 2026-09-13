@@ -1,0 +1,115 @@
+id: tools/047-archive-and-transfer
+title: Hand the reporting tree to the backup operator
+# Three objectives, two chapters. tools.ssh.client and tools.ssh.transfer both
+# carry chapters: [5] in content/objectives.yaml; tools.archive.tar carries
+# chapters: [3]. Two of the three name chapter 5, and the archive here exists in
+# order to be transferred - the transfer is the spine of the task and the tar is
+# the payload - so 5 is the dominant chapter rather than a coin toss.
+chapter: 5
+scope: exam-objective
+rhel: 9
+objectives:
+  - tools.archive.tar
+  - tools.ssh.client
+  - tools.ssh.transfer
+# net.ssh-keypairs-and-authorized-keys is reused rather than duplicated: the key
+# that authenticates student to backupop is installed by setup.sh, but the student
+# still has to understand which half of a pair is where and why ssh does not offer
+# a key whose filename is not one of its defaults - that card says both.
+# files.copy-preserving-attributes is reused for the same reason and is the sharper
+# of the two: it already documents, from a measurement, that an ordinary user's
+# `cp -p` loses ownership in silence, and it already names the
+# `tar -C src -cf - . | tar -C dst -xpf -` idiom this task is built on.
+requires_concepts:
+  - tools.archive-tar-and-compression
+  - tools.ssh-client-and-remote-copy
+  - net.ssh-keypairs-and-authorized-keys
+  - files.copy-preserving-attributes
+# 3. Nothing here is a hunt across subsystems, and the key is already installed -
+# but the answer has four moving parts that must all be right at once (the archive
+# shape, the compression, the transport, the extraction flags), and the one that
+# fails candidates is invisible: an extraction that drops permission bits produces
+# a tree that looks perfect. A 2 would be a task where the mistake announces
+# itself.
+difficulty: 3
+time_budget: 720
+# All three objectives survive into R10's table. tools.ssh.client and
+# tools.ssh.transfer appear with identical wording in the same chapter 5
+# (content/objectives-rhel10.yaml:56 and :146). tools.archive.tar is renamed to
+# tools.archive.tar-gzip-bzip2 (:66) because RHEL 10 ships no `star` and Red Hat
+# dropped it from the bullet - an editorial narrowing of the tool list, not a
+# change of subject, and nothing this task asks for involves star. Durable core
+# material.
+weight: high
+editions: [r9, r10]
+# FALSE, deliberately, and the reasoning belongs here rather than in a commit
+# message.
+#
+# Everything this task grades is file state: an archive file and an unpacked
+# directory tree in another account's home directory. File state survives a reboot
+# by construction. There is no unit to enable, no fstab line to write, no runtime
+# setting that a reload discards - so a second verdict would re-measure the first
+# one and report "still true" for eight checkpoints, which is a slower way of
+# saying nothing.
+#
+# There is one thing here that would NOT survive, and it is the reason this is a
+# considered `false` rather than a lazy one: transfer-over-ssh is answered from the
+# journal, and a guest whose journald is volatile loses that evidence at the
+# reboot. A checkpoint that was green in verdict A and red in verdict B is reported
+# as a REGRESSION - the harness's word for "the student's answer did not persist" -
+# and that reading would be flatly wrong here: nothing about the student's answer
+# changed, only the log did. Turning the reboot on would manufacture a false
+# regression on some guests and a true pass on others, decided by a journald
+# setting no exam objective in this task mentions.
+reboot_check: false
+requires_disks: 0
+transport: ssh
+prompt: |
+  The reporting data under /srv/reports has to be handed over to the backup
+  operator account, backupop, as one compressed archive - and then unpacked
+  there, intact, so the operator has a working copy and not just a tarball.
+
+  Everything happens on this one host. There is a second machine in the story
+  and there is only one machine in the lab, so backupop is reached the way a
+  remote account is reached: over this host's own SSH server, as a real client
+  against a real sshd. The commands are exactly the ones you would type at a
+  second host; only the address is the same box.
+
+  What you have been given:
+
+  - backupop already exists. Its home directory is /home/backupop and only
+    backupop may enter it.
+  - The private key /home/student/backup-key already authenticates student to
+    backupop on this host, and its public half is already installed for
+    backupop. You do not need to create or install any key. Note the file name:
+    it is not one of the names an SSH client tries on its own.
+
+  What is required:
+
+  - One archive file at /home/backupop/reports.tar.gz, holding the whole
+    /srv/reports tree - README.txt, ledger.csv, rotate-reports.sh, and the daily/
+    subdirectory with both of its log files.
+  - That archive must be compressed with gzip. Not bzip2, not xz, not
+    uncompressed. The name is fixed for you; the contents have to match it.
+  - The archive must reach /home/backupop over SSH. Copying it into place by any
+    other route does not count as transferring it to another system.
+  - The archive must then be unpacked in backupop's home so that the tree lands
+    at /home/backupop/reports - /home/backupop/reports/ledger.csv,
+    /home/backupop/reports/daily/, and so on.
+  - The unpacked copy must carry the same permission bits and the same
+    modification times as the originals under /srv/reports. Two of those
+    originals are the ones worth checking afterwards: ledger.csv is writable by
+    its group, and rotate-reports.sh carries the setgid bit. Both must still be
+    that way in backupop's copy. A tree that lost them looks completely normal
+    in `ls -l` until you compare it against the source.
+  - Everything under /home/backupop/reports must belong to backupop. It is the
+    operator's copy; an account that cannot manage its own files has not been
+    handed anything.
+
+  Two things to leave alone:
+
+  - /srv/reports itself. Copy it, do not move it, and do not "fix" its
+    permissions to match a copy that came out wrong.
+  - student's own ~/.ssh directory and the authorized_keys file in it. This
+    machine is graded over student's key access; breaking it does not fail a
+    check, it ends the exercise. Nothing this task asks for is in there.

@@ -1,0 +1,82 @@
+id: systemd/048-targets-and-clean-shutdown
+title: Boot once into a different target, and clear the pending reboot
+# Two objectives, two chapters: boot.targets.manual carries chapters: [18] and
+# boot.lifecycle.shutdown carries chapters: [5] (content/objectives.yaml:73-78).
+# 18 wins as the dominant chapter, and not by a coin toss: three of the four goal
+# checkpoints are the target half, chapter 18 is where the kernel command line and
+# `isolate` are taught, and chapter 5's shutdown material is a page of verbs the
+# scheduled-reboot half revisits rather than introduces.
+chapter: 18
+scope: exam-objective
+rhel: 9
+objectives:
+  - boot.targets.manual
+  - boot.lifecycle.shutdown
+requires_concepts:
+  - systemd.targets-and-default
+  - systemd.isolating-targets-and-shutdown
+difficulty: 4
+# 4, not 3. Nothing here is a long command, but the task has two independent
+# halves and the trap in each one is a "that looked like it worked" - `isolate`
+# with no kernel argument, and a cancelled shutdown that comes back at the next
+# boot. Candidates lose this task by stopping one step early, twice.
+time_budget: 900
+# Present in both editions and unchanged: `systemd.unit=` on the kernel line and
+# `shutdown -c` are the same in R10's chapters 18 and 5. Durable core material.
+weight: high
+editions: [r9, r10]
+# The reboot is the whole point of this task rather than a persistence tax on it.
+# Both halves are deliberately built so that verdict A and verdict B disagree for
+# a wrong answer and agree for a right one:
+#
+#   1. `systemctl isolate graphical.target` makes graphical-target-active pass
+#      immediately and proves nothing about the next boot. antisolutions/03 is
+#      exactly that answer, and graphical-target-active is green in A and red in
+#      B for it. Nothing on the running system distinguishes it from a correct
+#      answer - which is the lesson, stated as a measurement.
+#   2. A scheduled shutdown is runtime state under /run. Cancelling it is visible
+#      immediately; whether it comes *back* is only visible after a boot, and
+#      setup.sh plants an enabled unit that re-arms it precisely so that question
+#      has an answer. antisolutions/01 cancels and does not disable, and
+#      no-reboot-pending is green in A and red in B for it.
+#
+# The post-reboot run can also only pass for the right reason: default.target is
+# still multi-user.target (default-target-unchanged asserts it), so verdict B
+# finding graphical.target active has exactly one available explanation - the
+# kernel argument the candidate added.
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  A change window is coming. Two things have to be arranged on this host before
+  it opens, and neither of them may take the machine down now.
+
+  First, a one-off boot. The team needs the *next* boot of this machine - and
+  only the next boot - to come up in graphical.target instead of the target it
+  normally uses.
+
+  - Arrange for the next boot to activate graphical.target, by way of the boot
+    loader entry the machine actually boots. Every kernel entry may carry it;
+    the one that boots by default must.
+  - The machine must also be in graphical.target right now, without rebooting.
+  - The machine's default target must not change. Once this window is over,
+    somebody will remove the boot loader argument again and the machine has to
+    go back to booting the way it does today, with nothing else to undo.
+
+  Second, the change window's own scheduling has already been half done by
+  somebody else, and badly.
+
+  - A reboot is currently scheduled on this host. Cancel it. Nothing may be
+    scheduled when you are finished.
+  - Something on this machine puts that schedule back every time the machine
+    starts. Find it and stop it from running at boot. It is not enough to cancel
+    what is pending now: after the next boot, nothing may be scheduled either.
+
+  Constraints, and they are not decoration:
+
+  - Do not shut down, power off or halt this machine, and do not reboot it
+    yourself. Everything asked for above can be arranged on a running system.
+  - Leave sshd alone, and leave the network alone. This machine is graded over
+    ssh; losing it does not fail a check, it ends the exercise.
+  - Do not boot or isolate rescue.target or emergency.target. Both stop the
+    network, and the previous sentence applies.

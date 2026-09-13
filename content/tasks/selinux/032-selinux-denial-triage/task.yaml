@@ -1,0 +1,75 @@
+id: selinux/032-selinux-denial-triage
+title: Triage the SELinux denial that broke the reporting endpoint
+chapter: 22
+scope: exam-objective
+rhel: 9
+# All four ids carry chapters: [22] in content/objectives.yaml, which is where
+# `chapter: 22` above comes from. selinux.contexts.identify is claimed because
+# the only way through this task is to read two labels - the one on the inode
+# and the one the policy would assign - and notice they disagree.
+# selinux.contexts.restore is claimed because every solution has to make the
+# label survive a relabel, and the only way to do that is to teach the policy a
+# rule and then apply it with restorecon - all three solutions/ scripts run it.
+#
+# selinux.modes.enforcing-permissive is deliberately NOT claimed, even though
+# grade.sh checks the mode now and at next boot. The student sets no mode in
+# this task: both mode checkpoints already pass on a clean guest and stay green
+# only by being left alone, so they are do-not-touch invariants, not something
+# taught. checkCoverage (src/engine/content/bank.ts:181-189) cannot tell a
+# guarded objective from a taught one - it just unions `objectives:` over every
+# exam-objective task - so claiming it here would report the mode objective as
+# covered when nothing in the bank actually makes a student switch modes.
+objectives:
+  - selinux.contexts.identify
+  - selinux.contexts.restore
+  - selinux.booleans.modify
+  - selinux.troubleshoot.violations
+requires_concepts:
+  - selinux.reading-avc-denials
+  - selinux.fcontext-vs-chcon
+  - selinux.booleans-are-policy-switches
+  # Not one of this task's own cards. selinux.fcontext-vs-chcon names it as its
+  # prerequisite, so the student who has not seen it gets it pulled in here
+  # rather than meeting the two-labels idea for the first time mid-ticket.
+  - selinux.labels-now-vs-policy
+difficulty: 4
+time_budget: 900
+# High: three of the four objectives above (contexts.identify, contexts.restore,
+# booleans) are in both editions' chapter 22, and "the service is broken and
+# SELinux is why" is the shape most of the exam's SELinux marks arrive in.
+weight: high
+# Chapter 22 exists in both editions and so do both contexts ids and booleans.
+# selinux.troubleshoot.violations is the one r9-only objective (see the comment
+# above it in content/objectives.yaml) - an r10 run of this task teaches the
+# same material and simply claims one objective fewer, which is why this is not
+# narrowed to [r9].
+editions: [r9, r10]
+# reboot_check: true earns its cost here rather than being copied from 014.
+# The whole point of the boolean half of this ticket is that `setsebool` and
+# `setsebool -P` are indistinguishable until the machine boots: without verdict
+# B, a student who omits -P sees a working endpoint, a green boolean-now, and no
+# signal at all that the fix evaporates at 3am. boolean-persistent catches that
+# statically in verdict A, and verdict B is what proves boolean-persistent is
+# telling the truth rather than measuring the wrong file.
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  Last night's hardening run touched this host, and since then the internal
+  reporting endpoint has been failing. Monitoring gets an HTTP error from
+  http://localhost/reports/status.sh instead of the report.
+
+  Apache is installed, running, and its configuration was not part of the
+  change. The reporting script is deployed to /srv/reports/status.sh by
+  configuration management.
+
+  Make the endpoint return the report again by correcting SELinux, not by
+  getting out of its way.
+
+  - Leave the script where it is deployed, and leave Apache's configuration
+    alone.
+  - Your change must still be correct after a full filesystem relabel. A fix a
+    relabel would undo is not a fix.
+  - Your change must still be in effect after a reboot.
+  - SELinux stays in enforcing mode, now and at the next boot. Putting the host
+    in permissive mode is not an answer to this ticket.

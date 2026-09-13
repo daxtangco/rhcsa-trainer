@@ -8,6 +8,7 @@ objectives:
 requires_concepts:
   - storage.lvm-abstraction-stack
   - storage.why-xfs-cannot-shrink
+  - storage.extents-and-size-syntax
 difficulty: 3
 time_budget: 600
 # Present in both editions' chapter 15, so it is durable core material

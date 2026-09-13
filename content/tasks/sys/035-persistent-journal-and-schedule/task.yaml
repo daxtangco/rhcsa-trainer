@@ -1,0 +1,50 @@
+id: sys/035-persistent-journal-and-schedule
+title: Keep the journal and schedule a nightly error report
+# Two of the three objectives below carry chapters: [13] in
+# content/objectives.yaml and the third (sys.cron.schedule) carries [12].
+# chapter is a single integer, so it names the chapter the task is *filed*
+# under, which is the one its primary objective comes from - the same choice
+# systemd/017-boot-time-service makes when it claims an objective from
+# chapter 11 and another from chapter 17 and files itself under 11. The journal
+# is the primary objective here: the schedule exists to be read back out of it.
+chapter: 13
+scope: exam-objective
+rhel: 9
+objectives:
+  - sys.logs.persistent-journal
+  - sys.logs.journal
+  - sys.cron.schedule
+requires_concepts:
+  - sys.journald-storage-modes
+  - sys.journalctl-filters
+  - sys.cron-vs-timers
+  - tools.redirection-and-streams
+difficulty: 4
+time_budget: 900
+# All three objectives survive into R10's table; R10 adds systemd timer units
+# to the cron bullet rather than removing cron, so the constraint the prompt
+# states ("use cron") is still the R10-correct answer to an at/cron question.
+weight: high
+editions: [r9, r10]
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  This host was handed over in a hurry and two things were left undone: the
+  journal is volatile, so everything logged is thrown away at the next boot,
+  and the task scheduler is switched off. Auditing wants both fixed, plus a
+  nightly error report they can read without logging in.
+
+  - Make the systemd journal survive a reboot. After the next reboot you must
+    still be able to read what this boot logged.
+  - Get the cron scheduler running, and running again by itself after a reboot.
+  - Every day at 23:30, as the user student, capture every journal message of
+    priority err or worse into /var/log/rhcsa-audit/journal-errors.log. That
+    directory already exists and student can write to it. Use cron for this,
+    not a systemd timer - the ticket asks for a cron job.
+  - Hand over a report that already exists: run the capture once yourself
+    rather than waiting for 23:30.
+
+  The journal already carries two messages tagged rhcsa-audit, one at err
+  priority and one at info priority. A correct report contains the err one and
+  not the info one.

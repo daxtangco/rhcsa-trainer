@@ -1,0 +1,81 @@
+id: net/046-key-based-ssh-login
+title: Give the deployment account key-based SSH access
+# net.ssh.key-auth carries chapters: [20] in content/objectives.yaml and it is the
+# only objective this task claims, so there is nothing to arbitrate.
+chapter: 20
+scope: exam-objective
+rhel: 9
+objectives:
+  - net.ssh.key-auth
+requires_concepts:
+  - net.ssh-keypairs-and-authorized-keys
+  - net.ssh-permissions-and-strictmodes
+  - selinux.fcontext-vs-chcon
+difficulty: 3
+time_budget: 600
+# The objective survives into R10's table with identical wording in the same
+# chapter (content/objectives-rhel10.yaml:263), and nothing about ssh-keygen or
+# authorized_keys has moved in a decade. Durable core material.
+weight: high
+editions: [r9, r10]
+# True, and it earns it - which is not obvious, because key authentication is pure
+# file state and file state survives a reboot trivially. Two things make the second
+# verdict carry real information here rather than repeating the first:
+#
+#   1. The SELinux escape hatch. A candidate who installs the key by moving a file
+#      in from outside the home tree gets a context sshd will not read, sees
+#      "Permission denied",
+#      and reaches for `setenforce 0` - at which point the login works perfectly
+#      and stays working until the next boot. antisolutions/04 is exactly that, and
+#      deploy-key-login is green in verdict A and red in verdict B for it. Nothing
+#      readable on the running system distinguishes it from a correct answer.
+#   2. An answer built on `ssh-agent`. A key loaded into an agent in the
+#      candidate's own shell is not a configured account, and it is gone at the
+#      next boot. (That one is already caught in verdict A, because the grader's
+#      session carries no agent - but the reboot is what makes the claim
+#      unarguable.)
+#
+# The reboot is also the only honest test of "the automation will still work
+# tomorrow", which is what the ticket in the prompt is actually asking for.
+reboot_check: true
+requires_disks: 0
+transport: ssh
+prompt: |
+  A deployment account named deploy has just been created on this host. Its
+  password is Deploy-Lab-2026! for now. The job that will drive it runs as
+  student on this same host, unattended, and can neither type a password nor
+  answer a prompt - so it needs key-based SSH access instead.
+
+  Everything below happens on this one host. Nothing on any other machine is
+  involved.
+
+  - The student account must hold an SSH keypair of its own, kept in student's
+    own SSH directory, and the private key must be usable with no passphrase.
+  - The deploy account must accept that public key: install it in deploy's own
+    authorized-keys file, in the default place under deploy's home directory.
+  - deploy's home directory, deploy's SSH directory and that authorized-keys
+    file must all belong to deploy. No user other than deploy may write to
+    deploy's home directory, and neither the SSH directory nor the
+    authorized-keys file may be accessible to anyone but deploy. The SSH server
+    refuses a key whose surroundings it does not trust, and it refuses it
+    without saying so.
+  - Everything you create under deploy's home directory must carry the SELinux
+    context the policy specifies for that path.
+  - The deploy account must not end up holding a copy of anybody's private key.
+  - From student's account on this host, a login to deploy@localhost must
+    succeed with no password, no passphrase and no prompt of any kind - it has
+    to work in a batch session where there is nothing to type into. Nothing
+    extra may be needed on the command line either: the plain login has to work
+    on its own, without anyone pointing the client at a particular key file
+    every time. It must still work after a reboot.
+
+  Two things to leave alone, and they are not decoration:
+
+  - Do not change the SSH server's configuration. The account's own files are
+    where this belongs, and weakening the server to make a key work is the
+    wrong answer even when it is an effective one.
+  - Do not touch student's existing ~/.ssh/authorized_keys, the mode of
+    student's ~/.ssh, or who owns them. This machine is graded over student's
+    own key access; breaking it does not fail a check, it ends the exercise.
+    Adding your new keypair alongside it is exactly what you are being asked to
+    do and is not a problem.

@@ -10,7 +10,14 @@
 # baseline-fail: lv-home-size, fs-home-size
 
 TARGET=$(to_bytes 12G) || TARGET=
-VAR_MIN=$(to_bytes 2G) || VAR_MIN=
+# 2 GiB less a 64 MiB rounding allowance, matching storage/034's floors. LVM
+# allocates whole 4 MiB extents, so an installer-created volume lands under its
+# nominal size rather than on it - measured on the lab guest, rhel/home is one
+# extent short of 8 GiB and rhel/swap one short of 2 GiB. rhel/var happens to
+# land on exactly 2 GiB here, so a bare `to_bytes 2G` passes today with zero
+# margin; the next guest whose layout rounds /var down the way it rounded /home
+# would fail this invariant and blame the student. 034 hit precisely that.
+VAR_MIN=$(to_bytes 1984M) || VAR_MIN=
 HOME_LV_MIN=$TARGET
 
 # Fail closed. bash treats an empty operand as 0, so `[[ n -ge "$TARGET" ]]` is
@@ -22,7 +29,7 @@ if [[ -z $TARGET || -z $VAR_MIN ]]; then
   ck_fail lv-home-size "logical volume rhel/home is at least 12 GiB" "$detail"
   ck_fail fs-home-size "the filesystem on /home is at least 12 GiB" "$detail"
   ck_fail home-from-lv "/home is mounted from the rhel/home logical volume" "$detail"
-  ck_fail var-intact "/var is untouched: still its own LV, still at least 2 GiB" "$detail"
+  ck_fail var-intact "/var is untouched: still its own LV, still at full size" "$detail"
   ck_fail persist-config "/home is configured to mount at boot" "$detail"
   exit 0
 fi
@@ -85,14 +92,14 @@ var_lv=$(lv_size_bytes rhel var || echo 0)
 case $var_src in
   /dev/mapper/rhel-var | /dev/rhel/var)
     if [[ ${var_lv:-0} -ge $VAR_MIN ]]; then
-      ck_pass var-intact "/var is untouched: still its own LV, still at least 2 GiB"
+      ck_pass var-intact "/var is untouched: still its own LV, still at full size"
     else
-      ck_fail var-intact "/var is untouched: still its own LV, still at least 2 GiB" \
+      ck_fail var-intact "/var is untouched: still its own LV, still at full size" \
         "rhel/var is now ${var_lv:-0} bytes"
     fi
     ;;
   *)
-    ck_fail var-intact "/var is untouched: still its own LV, still at least 2 GiB" \
+    ck_fail var-intact "/var is untouched: still its own LV, still at full size" \
       "/var is mounted from ${var_src:-nothing}"
     ;;
 esac

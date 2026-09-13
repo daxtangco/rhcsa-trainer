@@ -87,9 +87,13 @@ need sudo rm -f /run/rhcsa-stamp
 
 # default-target and sshd-intact are invariants: prove they are true before the
 # student starts, so a failure can only mean the student broke them.
-target=$(systemctl get-default 2>&1)
+# Same line-shape extraction as this task's grade.sh, for the same reason: a
+# precondition that reads the system differently from the grader it is a
+# precondition for is a trap.
+target_raw=$(systemctl get-default 2>&1)
+target=$(printf '%s\n' "$target_raw" | grep -xE '[[:alnum:]@._:-]+\.target' | tail -n 1)
 [ "$target" = "multi-user.target" ] \
-  || fail "get-default reports '$target' after set-default; the default-target invariant would fail for every fixture"
+  || fail "get-default reports '$target' after set-default (full output: $(printf '%s' "$target_raw" | tr '\n' ' ')); the default-target invariant would fail for every fixture"
 # sshd-intact's grader probe is `grep -qx enabled` as of the F15 commit, so this
 # has to be too. On the bare exit status setup accepted static, indirect,
 # generated, alias and enabled-runtime while the grader rejects them - and the

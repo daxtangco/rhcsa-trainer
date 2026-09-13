@@ -25,9 +25,19 @@ ck stamp-effect "/run/rhcsa-stamp exists (after the reboot: it ran at boot)" $?
 # actually probe - antisolutions/03-broke-the-target.sh. That is the pattern
 # the four checkpoints carrying an unprobed-invariant header would follow if
 # breaking them were survivable.
-target=$(systemctl get-default 2>&1)
+#
+# Extracted by line shape rather than compared whole, and spelled exactly as
+# systemd/048's grader spells it. This task pins nothing on the kernel commandline,
+# so the advisory line `systemctl get-default` prepends when it finds systemd.unit
+# there - which failed all three of 048's reboot fixtures on the guest - cannot
+# appear here unless something outside this task put the argument there. This copy
+# has never been observed failing; it is the same reader in the same tree, which is
+# the point. A parser left wrong in one task is the parser the next task copies.
+target_raw=$(systemctl get-default 2>&1)
+target=$(printf '%s\n' "$target_raw" | grep -xE '[[:alnum:]@._:-]+\.target' | tail -n 1)
 [ "$target" = "multi-user.target" ]
-ck default-target "the system boots to multi-user.target" $? "get-default=$target"
+ck default-target "the system boots to multi-user.target" $? \
+  "get-default=$(printf '%s' "$target_raw" | tr '\n' ' ')"
 
 # Knowingly unprobed: breaking sshd is breaking the ssh control plane this task
 # is graded over (transport: ssh), so the fixture would take the grader down
