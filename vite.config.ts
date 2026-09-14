@@ -13,6 +13,17 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: VITE_DEV_PORT,
+    // The attempt store is a SQLite database under `.rhcsa/`, and every session
+    // start writes `vm_state` to it. Vite watches the project root, a `.db-wal`
+    // write is a file change like any other, and the change is not importable - so
+    // Vite's fallback is a **full page reload**. The result was a lab that could not
+    // be started at all: press Start, the server reverts the guest, the WAL moves,
+    // the browser reloads mid-request, and the student is handed the picker again
+    // with no error anywhere. The session had been created; nothing was left to show
+    // it. Ignoring the directory is the whole fix, and it belongs here rather than in
+    // `.gitignore` (which Vite does not read) or in the store (whose job is not to
+    // hide from a bundler).
+    watch: { ignored: ['**/.rhcsa/**'] },
     proxy: {
       '/api': 'http://localhost:5175',
       // ws: true is the part people forget, and without it the terminal
