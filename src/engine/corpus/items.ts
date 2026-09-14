@@ -69,8 +69,14 @@ const ID_SHAPES: Record<CorpusKind, RegExp> = {
   exercise: /^Exercise (\d{1,2})-\d{1,2}$/,
 }
 
-/** Spec section 2: RHCSA 9 has 28 chapters, the higher of the two editions. */
-const MAX_CHAPTER = 28
+/**
+ * Spec section 2: RHCSA 9 has 28 chapters, the higher of the two editions.
+ *
+ * Exported because `/api/guided/chapter/:n` validates against it, and a second
+ * literal 28 in the server would be a bound that can drift from the one the
+ * extractor enforces.
+ */
+export const MAX_CHAPTER = 28
 
 function isEdition(v: unknown): v is Edition {
   return typeof v === 'string' && Object.hasOwn(EDITIONS, v)

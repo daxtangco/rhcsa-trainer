@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { SessionMode, TaskSummary } from '../api.ts'
+import { groupByChapter } from '../chapters.ts'
 
 // Every `SessionMode` must have a card here, or the picker silently cannot offer
 // a mode the ladder supports. The type on the array catches a *wrong* id, not a
@@ -12,50 +13,6 @@ const MODES: Array<{ id: SessionMode; label: string; blurb: string }> = [
   { id: 'drill', label: 'Drill', blurb: 'Concept cards only. No command sketch, no solution.' },
   { id: 'exam', label: 'Exam', blurb: 'One nudge. Scores are masked until you finish.' },
 ]
-
-interface ChapterGroup {
-  chapter: number
-  tasks: TaskSummary[]
-}
-
-/**
- * Chapter order, with the empty chapters kept in.
- *
- * The order matters because the bank arrives in the order `bank.ts` loads it,
- * which sorts task *file paths* - so it comes out grouped by area and then by
- * authoring number, and `net/044` sits next to `net/045` while the chapters
- * interleave. That is the order the files were written in, not an order to study
- * in. The book's own order is a dependency order: chapter 15 assumes chapter 14,
- * and reading it the other way round is the thing this screen should not quietly
- * encourage.
- *
- * `chapters` comes from the book corpus and is a strictly larger set than the
- * chapters the bank covers, which is the whole point: a chapter with no task is
- * rendered as an empty group rather than skipped, because the gaps are the
- * authoring backlog and a picker that hides them makes 27 tasks look finished. A
- * task whose chapter is *not* in `chapters` still gets a group - that covers both
- * the server-has-no-corpus case (`chapters` is `[]`, so grouping falls back to the
- * chapters the tasks name) and the case of a task claiming a chapter the book does
- * not have, which should be visible rather than dropped on the floor.
- */
-function groupByChapter(tasks: TaskSummary[], chapters: number[]): ChapterGroup[] {
-  const byChapter = new Map<number, TaskSummary[]>()
-  for (const c of chapters) byChapter.set(c, [])
-  for (const t of tasks) {
-    const existing = byChapter.get(t.chapter)
-    if (existing === undefined) byChapter.set(t.chapter, [t])
-    else existing.push(t)
-  }
-  return [...byChapter.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([chapter, list]) => ({
-      chapter,
-      // Within one chapter, the id is the authoring order and there is nothing
-      // better to sort on: two tasks in the same chapter do not declare which
-      // comes first.
-      tasks: [...list].sort((a, b) => a.id.localeCompare(b.id)),
-    }))
-}
 
 export interface TaskPickerProps {
   tasks: TaskSummary[]
@@ -165,7 +122,8 @@ export function TaskPicker({ tasks, chapters = [], error, busy = false, onStart 
                 // button, because there is nothing to start - clicking it must not
                 // look like it might work.
                 <p className="px-3 py-2 pl-6 text-sm text-zinc-600 italic">
-                  Not authored. Study the chapter from the book; there is no graded lab for it.
+                  No graded lab yet. The book's own exercises for this chapter are on the Learn
+                  screen — click the chapter heading there.
                 </p>
               ) : (
                 <ul className="divide-y divide-zinc-800/60">

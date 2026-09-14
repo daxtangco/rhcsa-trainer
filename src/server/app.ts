@@ -3,11 +3,11 @@ import { checkCoverage, type Bank } from '../engine/content/bank.ts'
 import { ContentError } from '../engine/content/errors.ts'
 import type { TaskSpec } from '../engine/content/task.ts'
 import type { Corpus } from '../engine/corpus/corpus.ts'
-import type { Edition } from '../engine/corpus/items.ts'
+import { MAX_CHAPTER, type Edition } from '../engine/corpus/items.ts'
 import { planDemos, runDemo, type DemoPlan } from '../engine/demo/antisolution.ts'
 import { rungContent, type RungContent, type RungContext } from '../engine/disclosure/content.ts'
 import { deriveRating, RUNGS, TOP_RUNG, type Rating } from '../engine/disclosure/ladder.ts'
-import { guidedForObjective, guidedForTask } from '../engine/guided/select.ts'
+import { guidedForChapter, guidedForObjective, guidedForTask } from '../engine/guided/select.ts'
 import { finalVerdict, type GradeResult } from '../engine/grading/grader.ts'
 import { enforceOffline, offlineRequiredFor, restoreNetwork } from '../engine/vm/offline.ts'
 import type { AttemptRow, AttemptStore } from '../engine/store/attempts.ts'
@@ -472,6 +472,39 @@ export function createApp(deps: AppDeps): Hono {
     if ('error' in primary) return c.json({ error: primary.error }, 400)
 
     return c.json({ items: guidedForObjective(corpus, objective, primary.opts) })
+  })
+
+  /**
+   * Guided walkthroughs for one chapter of the book, addressed by number.
+   *
+   * The other two guided routes go through the bank — a task, or an objective — so a
+   * chapter that no task and no objective names cannot be opened through either,
+   * even though its exercises are in the corpus. That is exactly the authoring
+   * backlog `GET /api/tasks` reports in `chapters`, and without this route the Learn
+   * screen can list those chapters and then offer nothing for them.
+   *
+   * **400 for a chapter outside 1..MAX_CHAPTER, not 404**, and the distinction is
+   * deliberate: `28` is the schema's own bound (`corpus/items.ts`), so `0` or `99` is
+   * a malformed request rather than a missing thing. A well-formed chapter the book
+   * has no exercises for is a **200 with an empty list** - the same real answer
+   * `guidedForObjective` gives, and not hypothetical here, since chapters 1, 27 and
+   * 28 have none in either edition.
+   */
+  app.get('/api/guided/chapter/:chapter', (c) => {
+    const corpus = deps.corpus
+    if (corpus === undefined) return c.json({ error: 'the corpus is not loaded on this server' }, 500)
+    const raw = c.req.param('chapter')
+    const chapter = Number(raw)
+    // `Number.isInteger` and not a regex: it rejects '1.5', '1e1', ' 1' and '' in one
+    // reading, and the range check does the rest.
+    if (!Number.isInteger(chapter) || chapter < 1 || chapter > MAX_CHAPTER) {
+      return c.json({ error: `chapter must be an integer 1-${MAX_CHAPTER}, not ${raw}` }, 400)
+    }
+
+    const primary = primaryFor(c.req.query('primary'))
+    if ('error' in primary) return c.json({ error: primary.error }, 400)
+
+    return c.json({ items: guidedForChapter(corpus, chapter, primary.opts) })
   })
 
   app.post('/api/sessions', async (c) => {

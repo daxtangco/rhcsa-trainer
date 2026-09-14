@@ -123,6 +123,7 @@ const fake = {
   conceptGraph: vi.fn(async () => ({ concepts: [], problems: [] })),
   guidedForTask: vi.fn(async () => []),
   guidedForObjective: vi.fn(async () => []),
+  guidedForChapter: vi.fn(async () => []),
   grade: vi.fn(async (): Promise<GradeResponse> => GRADED),
   finish: vi.fn(
     async (): Promise<FinishResponse> => ({

@@ -378,6 +378,14 @@ export function createApi(fetchImpl: typeof fetch = fetch) {
     /** Objective ids are dotted (`net.firewall.settings`), so there is no slash to preserve. */
     guidedForObjective: async (id: string): Promise<GuidedItem[]> =>
       (await call<{ items: GuidedItem[] }>(`/api/guided/objective/${encodeURIComponent(id)}`)).items,
+    /**
+     * The book's exercises for one chapter, which is the only way to reach a chapter
+     * no task and no objective names — the five in `chapters` that the bank has not
+     * caught up with. An empty list is a real answer, not an error: chapters 1, 27
+     * and 28 print no exercises in either edition.
+     */
+    guidedForChapter: async (chapter: number): Promise<GuidedItem[]> =>
+      (await call<{ items: GuidedItem[] }>(`/api/guided/chapter/${chapter}`)).items,
     start: (taskId: string, mode: SessionMode) =>
       post<StartedSession>('/api/sessions', { taskId, mode }),
     hint: (id: string) => post<HintResponse>(`/api/sessions/${id}/hint`),

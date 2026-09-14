@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Api, GuidedItem, TaskSummary } from '../api.ts'
+import { groupByChapter } from '../chapters.ts'
 import { GuidedWalkthrough } from '../components/GuidedWalkthrough.tsx'
 
 const LABEL = 'uppercase tracking-wide text-xs text-zinc-500'
@@ -10,13 +11,21 @@ function message(e: unknown): string {
 }
 
 /**
- * What the guided list was asked for. Two routes exist and they answer different
- * questions, so the screen keeps which one was used rather than flattening both
+ * What the guided list was asked for. Three routes exist and they answer different
+ * questions, so the screen keeps which one was used rather than flattening them
  * into a bare id: *"prepare me for this task"* unions the chapters of every
- * objective the task names, while *"teach me this objective"* takes that
- * objective's chapters alone.
+ * objective the task names, *"teach me this objective"* takes that objective's
+ * chapters alone, and *"open chapter 12"* goes straight at the corpus - the only
+ * one of the three that can reach a chapter the bank has no task for.
+ *
+ * `label` is carried rather than derived because `id` is the route's argument and
+ * not always the thing to print: a chapter's id is `12`, which on its own reads as
+ * an item count.
  */
-type Source = { kind: 'task'; id: string } | { kind: 'objective'; id: string }
+type Source =
+  | { kind: 'task'; id: string; label: string }
+  | { kind: 'objective'; id: string; label: string }
+  | { kind: 'chapter'; id: string; label: string }
 
 export interface LearnProps {
   api: Api
@@ -41,6 +50,7 @@ export interface LearnProps {
  */
 export function Learn({ api }: LearnProps) {
   const [tasks, setTasks] = useState<TaskSummary[]>([])
+  const [chapters, setChapters] = useState<number[]>([])
   const [tasksError, setTasksError] = useState<string | null>(null)
   const [source, setSource] = useState<Source>()
   const [items, setItems] = useState<GuidedItem[]>()
@@ -51,10 +61,10 @@ export function Learn({ api }: LearnProps) {
   useEffect(() => {
     api
       .tasks()
-      // This screen wants the tasks and not the book's chapter list: what it
-      // groups by is the objective, and a chapter with no task has no objective
-      // to teach here.
-      .then((v) => setTasks(v.tasks))
+      .then((v) => {
+        setTasks(v.tasks)
+        setChapters(v.chapters)
+      })
       .catch((e: unknown) => setTasksError(message(e)))
   }, [api])
 
@@ -62,6 +72,13 @@ export function Learn({ api }: LearnProps) {
     () => [...new Set(tasks.flatMap((t) => t.objectives))].sort((a, b) => a.localeCompare(b)),
     [tasks],
   )
+
+  // The same grouping the Lab picker uses, for the same reason: the bank's own
+  // order is by task file path, and the book's order is a dependency order. Here it
+  // does one thing more - the chapters with no task are the only ones whose heading
+  // is the *only* way in, so the heading being a button is what makes them
+  // studyable at all.
+  const groups = useMemo(() => groupByChapter(tasks, chapters), [tasks, chapters])
 
   const choose = useCallback(
     (next: Source) => {
@@ -71,7 +88,11 @@ export function Learn({ api }: LearnProps) {
       setOpenId(null)
       setLoading(true)
       const request =
-        next.kind === 'task' ? api.guidedForTask(next.id) : api.guidedForObjective(next.id)
+        next.kind === 'task'
+          ? api.guidedForTask(next.id)
+          : next.kind === 'objective'
+            ? api.guidedForObjective(next.id)
+            : api.guidedForChapter(Number(next.id))
       request
         .then(setItems)
         .catch((e: unknown) => setItemsError(message(e)))
@@ -96,22 +117,56 @@ export function Learn({ api }: LearnProps) {
         ) : null}
 
         <div className="mt-4">
-          <div className={LABEL}>prepare for a task</div>
-          <ul className="mt-1 space-y-1">
-            {tasks.map((t) => (
-              <li key={t.id}>
+          <div className={LABEL}>by chapter</div>
+          <p className="mt-1 text-xs text-zinc-500">
+            Click a chapter for the book's exercises in it, or a task under it to prepare for that
+            graded lab. Chapter order, because the book's is a dependency order.
+          </p>
+          <ul className="mt-2 space-y-2">
+            {groups.map((g) => (
+              <li key={g.chapter}>
+                {/*
+                  The heading is a button, and that is the load-bearing part of this
+                  screen. `guidedForTask` and `guidedForObjective` both reach the
+                  corpus *through* the bank, so before `guidedForChapter` existed a
+                  chapter with no task had no entry point here at all - its exercises
+                  were in the corpus and unreachable. Those are exactly the chapters a
+                  student most needs the book for, since there is no graded lab to
+                  practise instead.
+                */}
                 <button
                   type="button"
-                  onClick={() => choose({ kind: 'task', id: t.id })}
-                  className={`w-full text-left text-xs ${
-                    source?.kind === 'task' && source.id === t.id
+                  onClick={() =>
+                    choose({ kind: 'chapter', id: String(g.chapter), label: `chapter ${g.chapter}` })
+                  }
+                  className={`flex w-full items-baseline gap-2 text-left text-xs ${
+                    source?.kind === 'chapter' && source.id === String(g.chapter)
                       ? 'text-emerald-300'
-                      : 'text-zinc-300'
+                      : 'text-zinc-400'
                   }`}
                 >
-                  <span className="text-zinc-500">ch{t.chapter} </span>
-                  {t.title}
+                  <span className="tracking-wide">Chapter {g.chapter}</span>
+                  {g.tasks.length === 0 ? (
+                    <span className="text-amber-600/80">no graded lab</span>
+                  ) : null}
                 </button>
+                <ul className="mt-1 space-y-1 pl-3">
+                  {g.tasks.map((t) => (
+                    <li key={t.id}>
+                      <button
+                        type="button"
+                        onClick={() => choose({ kind: 'task', id: t.id, label: t.id })}
+                        className={`w-full text-left text-xs ${
+                          source?.kind === 'task' && source.id === t.id
+                            ? 'text-emerald-300'
+                            : 'text-zinc-300'
+                        }`}
+                      >
+                        {t.title}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
           </ul>
@@ -124,7 +179,7 @@ export function Learn({ api }: LearnProps) {
               <li key={id}>
                 <button
                   type="button"
-                  onClick={() => choose({ kind: 'objective', id })}
+                  onClick={() => choose({ kind: 'objective', id, label: id })}
                   className={`w-full text-left font-mono text-xs ${
                     source?.kind === 'objective' && source.id === id
                       ? 'text-emerald-300'
@@ -147,8 +202,9 @@ export function Learn({ api }: LearnProps) {
       <main className="min-w-0 flex-1 overflow-y-auto p-6">
         {source === undefined ? (
           <p className="text-zinc-500">
-            Pick a task or an objective on the left. Guided mode is first contact: everything is
-            open, and the graded version of the same material comes later on the Lab screen.
+            Pick a chapter, a task or an objective on the left. Guided mode is first contact:
+            everything is open, and the graded version of the same material comes later on the Lab
+            screen.
           </p>
         ) : loading ? (
           <p className="text-zinc-500">reading the corpus...</p>
@@ -159,7 +215,7 @@ export function Learn({ api }: LearnProps) {
           // empty list for a chapter the books teach without exercises, and
           // chapters 1, 27 and 28 have none in either edition.
           <p className="text-zinc-400">
-            No guided exercise for {source.id}. That means the book teaches this material without a
+            No guided exercise for {source.label}. That means the book teaches this material without a
             numbered exercise, not that anything is broken — the graded task on the Lab screen is
             still there.
           </p>
@@ -170,7 +226,7 @@ export function Learn({ api }: LearnProps) {
               onClick={() => setOpenId(null)}
               className="text-xs text-zinc-500 underline"
             >
-              back to the {items.length} walkthroughs for {source.id}
+              back to the {items.length} walkthroughs for {source.label}
             </button>
             <div className="mt-3">
               {/*
@@ -187,7 +243,7 @@ export function Learn({ api }: LearnProps) {
           <>
             <h2 className="text-zinc-100">
               {items.length === 1 ? '1 walkthrough' : `${items.length} walkthroughs`} for{' '}
-              {source.id}
+              {source.label}
             </h2>
             <p className="mt-1 text-xs text-zinc-500">
               Ordered as the exam values them: exercises printed in both editions first (durable

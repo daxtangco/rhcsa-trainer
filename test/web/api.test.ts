@@ -55,6 +55,26 @@ describe('createApi', () => {
     })
   })
 
+  it('unwraps the three guided routes to the item array, each addressed its own way', async () => {
+    // Three routes and three different rules about the id, which is the only thing
+    // worth pinning at this layer: the task id keeps its literal slash because it is
+    // two path segments, the objective id is percent-encoded because it is one, and
+    // the chapter is a number with nothing to encode. Each unwraps `{ items }` so no
+    // screen reaches into the envelope.
+    const { impl, seen } = fakeFetch(() => [200, { items: [{ id: 'Exercise 15-2' }] }])
+    const api = createApi(impl)
+
+    expect(await api.guidedForTask('storage/014-grow-home-lv')).toEqual([{ id: 'Exercise 15-2' }])
+    expect(await api.guidedForObjective('storage.lvm.resize')).toEqual([{ id: 'Exercise 15-2' }])
+    expect(await api.guidedForChapter(12)).toEqual([{ id: 'Exercise 15-2' }])
+
+    expect(seen.map((s) => s.url)).toEqual([
+      '/api/guided/task/storage/014-grow-home-lv',
+      '/api/guided/objective/storage.lvm.resize',
+      '/api/guided/chapter/12',
+    ])
+  })
+
   it('starts a session with a JSON body', async () => {
     const { impl, seen } = fakeFetch(() => [201, { id: 's1', rung: 1 }])
     const api = createApi(impl)

@@ -353,6 +353,36 @@ export function guidedForObjective(
 }
 
 /**
+ * Every guided walkthrough in one chapter of the book.
+ *
+ * This is the corpus asked its own question. `guidedForObjective` and
+ * `guidedForTask` both reach the exercises *through* the bank — an objective's
+ * `chapters:`, or a task's objectives' — so a chapter no task and no objective
+ * names is unreachable through either, even though its exercises are sitting in the
+ * corpus. Five chapters are in that state today (1, 12, 16, 17 and 21), which is
+ * the authoring backlog seen from the study side: the graded lab does not exist
+ * yet, but the book's own walkthrough does, and there was no way to open it.
+ *
+ * The corpus is keyed on chapters, so this is the *direct* form and the other two
+ * are the derived ones. It is written as a synthetic single-chapter objective for
+ * the same reason `guidedForTask` builds one: the chapter walk, the cross-edition
+ * pairing and the ordering all live in `guidedForObjective`, and a second copy of
+ * that loop is a second thing to keep correct.
+ *
+ * An empty array is a real answer, and here it is not hypothetical: chapters 1, 27
+ * and 28 have no exercises in either edition, so asking for chapter 1 returns `[]`
+ * and the caller has to say "the book teaches this without a numbered exercise"
+ * rather than treating it as a failure.
+ */
+export function guidedForChapter(
+  corpus: Corpus,
+  chapter: number,
+  opts: GuidedOptions = {},
+): GuidedItem[] {
+  return guidedForObjective(corpus, { id: `chapter ${chapter}`, text: '', chapters: [chapter] }, opts)
+}
+
+/**
  * Every guided walkthrough that prepares a student for one graded task.
  *
  * The task's objective ids are resolved through `objectiveSet` and their chapters

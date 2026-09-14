@@ -9,7 +9,7 @@ import type { LabRuntime } from '../../src/server/lab.ts'
 import { SessionStore } from '../../src/server/session.ts'
 
 /**
- * Guided mode's two routes (spec section 9.1).
+ * Guided mode's three routes (spec section 9.1).
  *
  * Driven against the **real** bank and the **real** corpus, because the whole
  * selection logic is a join between an objective's `chapters:` and a corpus
@@ -164,6 +164,95 @@ describe('GET /api/guided/objective/:id', () => {
   it('has no 500 arm of its own: the resolved objective cannot throw', async () => {
     const first = bank.objectives.objectives[0]?.id ?? ''
     expect((await app()(`/api/guided/objective/${first}`)).status).toBe(200)
+  })
+})
+
+describe('GET /api/guided/chapter/:chapter', () => {
+  const items = async (path: string) => {
+    const res = await app()(path)
+    expect(res.status, path).toBe(200)
+    return ((await res.json()) as { items: Array<{ id: string; chapter: number }> }).items
+  }
+
+  it('reaches every chapter the bank has no task for', async () => {
+    // The measured reason the route exists. These five chapters are in the corpus
+    // and in `GET /api/tasks`'s `chapters`, and no objective's `chapters:` lists
+    // them - so `guidedForTask` and `guidedForObjective`, which both walk the bank,
+    // cannot return their exercises at all. Asserted by chapter number rather than
+    // by count, because a task authored for chapter 12 tomorrow must not turn this
+    // test red: the route's answer does not depend on the bank.
+    for (const chapter of [12, 16, 17, 21]) {
+      const list = await items(`/api/guided/chapter/${chapter}`)
+      expect(list.length, `chapter ${chapter}`).toBeGreaterThan(0)
+      expect(list.every((i) => i.chapter === chapter), `chapter ${chapter}`).toBe(true)
+    }
+  })
+
+  it('answers 200 with an empty list for a chapter the book prints no exercise for', async () => {
+    // Chapters 1, 27 and 28: an introduction and the two sample exams. Not a 404 -
+    // the chapter exists and the honest answer about it is "nothing numbered here".
+    for (const chapter of [1, 27, 28]) {
+      expect(await items(`/api/guided/chapter/${chapter}`), `chapter ${chapter}`).toEqual([])
+    }
+  })
+
+  it('answers every chapter the task list advertises, so the Learn sidebar has no dead heading', async () => {
+    // The sidebar makes a button of every chapter in `chapters`. If any of them
+    // could 400 or 500, the screen would offer a click that reports a failure the
+    // student did not cause.
+    const res = await app()('/api/tasks')
+    const chapters = ((await res.json()) as { chapters: number[] }).chapters
+    expect(chapters.length).toBeGreaterThan(0)
+    for (const chapter of chapters) {
+      expect((await app()(`/api/guided/chapter/${chapter}`)).status, `chapter ${chapter}`).toBe(200)
+    }
+  })
+
+  it('400s a chapter outside the schema bound, and says what the bound is', async () => {
+    // 400 and not 404: 28 is the corpus schema's own limit, so 99 is a malformed
+    // request rather than a chapter that might exist somewhere. `1.5` and `twelve`
+    // are the same class of mistake - `Number('twelve')` is `NaN`, which `<` and `>`
+    // both answer false to, so the integer check is what rejects it.
+    for (const bad of ['0', '99', '1.5', 'twelve', '-3']) {
+      const res = await app()(`/api/guided/chapter/${bad}`)
+      expect(res.status, bad).toBe(400)
+      expect(await res.json(), bad).toMatchObject({
+        error: expect.stringContaining('integer 1-28'),
+      })
+    }
+  })
+
+  it('400s a bad ?primary, like the other two routes', async () => {
+    expect((await app()('/api/guided/chapter/15?primary=')).status).toBe(400)
+    expect((await app()('/api/guided/chapter/15?primary=r11')).status).toBe(400)
+  })
+
+  it('honours ?primary where the edition has the exercise, and falls back where it does not', async () => {
+    // `primary` is a preference, not a filter. Chapter 15 is the case that proves
+    // it: four of its five exercises are in both books and show r10 when asked,
+    // while Exercise 15-5 (Stratis) is RHCSA 9 only and shows r9 rather than
+    // vanishing from the list. Dropping it would silently shrink the chapter.
+    const res = await app()('/api/guided/chapter/15?primary=r10')
+    expect(res.status).toBe(200)
+    const list = ((await res.json()) as {
+      items: Array<{ id: string; editions: string[]; shown: { edition: string } }>
+    }).items
+    expect(list.length).toBeGreaterThan(0)
+    for (const i of list) {
+      expect(i.shown.edition, i.id).toBe(i.editions.includes('r10') ? 'r10' : 'r9')
+    }
+    // Both arms are actually exercised, or the loop above asserts nothing.
+    expect(list.some((i) => i.shown.edition === 'r10')).toBe(true)
+    expect(list.some((i) => !i.editions.includes('r10'))).toBe(true)
+  })
+
+  it('500s when the server has no corpus, rather than reporting an empty book', async () => {
+    // `corpus` is optional on `AppDeps` — a server started without the extracted
+    // books is a working lab with no guided mode. An empty list here would be
+    // indistinguishable from chapter 1's real answer.
+    const res = await app({ corpus: undefined })('/api/guided/chapter/15')
+    expect(res.status).toBe(500)
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining('not loaded') })
   })
 })
 

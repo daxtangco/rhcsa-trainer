@@ -4,7 +4,12 @@ import type { Corpus } from '../../src/engine/corpus/corpus.ts'
 import type { CorpusItem, Edition } from '../../src/engine/corpus/items.ts'
 import type { Objective, ObjectiveSet } from '../../src/engine/content/objectives.ts'
 import type { TaskSpec } from '../../src/engine/content/task.ts'
-import { guidedForObjective, guidedForTask, guidedItem } from '../../src/engine/guided/select.ts'
+import {
+  guidedForChapter,
+  guidedForObjective,
+  guidedForTask,
+  guidedItem,
+} from '../../src/engine/guided/select.ts'
 
 // The `Corpus` here is built in memory rather than loaded, because what is under
 // test is the selection rules and not the loader — `test/corpus/corpus.test.ts`
@@ -323,5 +328,41 @@ describe('guidedForTask', () => {
       'maps to unknown objective: nope.one',
       'maps to unknown objective: nope.two',
     ])
+  })
+})
+
+describe('guidedForChapter', () => {
+  it('returns the chapter exercises in the same order the other two routes use', () => {
+    // Same ordering, because it is the same selector underneath: a chapter is
+    // asked for directly instead of via an objective's `chapters:` list.
+    expect(guidedForChapter(CORPUS, 15).map((i) => i.id)).toEqual([
+      'Exercise 15-1',
+      'Exercise 15-2',
+      'Exercise 15-5',
+    ])
+  })
+
+  it('reaches a chapter no objective and no task names, which the other two cannot', () => {
+    // The reason this function exists. `guidedForObjective` needs an objective
+    // whose `chapters:` lists the chapter and `guidedForTask` needs a task that
+    // maps to such an objective; the real bank has neither for chapters 1, 12, 16,
+    // 17 and 21, so their exercises sat in the corpus with no entry point.
+    const corpus = corpusOf([
+      { items: [ex('Exercise 12-1', 'r9', 12, 'Managing Users', ['Type useradd linda.'])] },
+    ])
+    expect(guidedForChapter(corpus, 12).map((i) => i.id)).toEqual(['Exercise 12-1'])
+  })
+
+  it('returns an empty list for a chapter the book teaches without exercises', () => {
+    // Chapters 1, 27 and 28. An answer, not an error - the route returns 200.
+    expect(guidedForChapter(CORPUS, 27)).toEqual([])
+  })
+
+  it('excludes labs, like the other two', () => {
+    expect(guidedForChapter(CORPUS, 15).map((i) => i.id)).not.toContain('Lab 15.1')
+  })
+
+  it('passes the primary edition through', () => {
+    expect(guidedForChapter(CORPUS, 15, { primary: 'r10' })[0]?.shown.edition).toBe('r10')
   })
 })
