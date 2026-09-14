@@ -109,7 +109,8 @@ describe('the task picker orders by chapter and shows the backlog', () => {
       <TaskPicker tasks={[task(1, 11)]} chapters={[11, 12]} onStart={() => {}} />,
     )
 
-    // Four mode cards, one task, one Start. No sixth button for chapter 12.
+    // Four mode cards, one task row, that row's own Start. No seventh button for
+    // chapter 12.
     expect(container.querySelectorAll('button').length).toBe(6)
   })
 
@@ -144,5 +145,95 @@ describe('the task picker orders by chapter and shows the backlog', () => {
 
     fireEvent.click(getByText('Start'))
     expect(started).toEqual(['storage/002-task'])
+  })
+})
+
+describe('Start sits on the row it starts', () => {
+  // The scroller above makes the bottom of the page *reachable*; it does not make it
+  // a sensible place to keep the button. With twenty-seven tasks, starting the first
+  // one meant scrolling to the bottom and back, and the trip back was the worse half
+  // - by then the screen no longer showed which task was about to run. These pin the
+  // placement, because a later tidy-up that collects the button back into a footer
+  // would reintroduce exactly that.
+
+  const rowOf = (el: Element | null): Element | null => el?.closest('li') ?? null
+
+  it('renders exactly one Start, on the selected row', () => {
+    const { container, getByText, getAllByText } = render(
+      <TaskPicker tasks={[task(1, 4), task(2, 9)]} chapters={[4, 9]} onStart={() => {}} />,
+    )
+
+    expect(getAllByText('Start')).toHaveLength(1)
+    // Same `li` as the selected task's title - not a footer, not the chapter
+    // heading, not the other row.
+    expect(rowOf(getByText('Start'))).toBe(rowOf(getByText('Task number 1')))
+    // And nothing after the list: the last button in the document belongs to a row.
+    const buttons = [...container.querySelectorAll('button')]
+    expect(rowOf(buttons[buttons.length - 1] ?? null)).not.toBeNull()
+  })
+
+  it('moves Start to whichever row is selected, and starts that one', () => {
+    const started: Array<[string, string]> = []
+    const { getByText } = render(
+      <TaskPicker
+        tasks={[task(1, 4), task(2, 9)]}
+        chapters={[4, 9]}
+        onStart={(id, mode) => started.push([id, mode])}
+      />,
+    )
+
+    fireEvent.click(getByText('Task number 2'))
+    expect(rowOf(getByText('Start'))).toBe(rowOf(getByText('Task number 2')))
+
+    fireEvent.click(getByText('Start'))
+    // The id of the row the button is on, and the mode still comes from the cards
+    // above - `practice` is the default.
+    expect(started).toEqual([['storage/002-task', 'practice']])
+  })
+
+  it('reports the revert on the row and refuses a second press while it runs', () => {
+    const started: string[] = []
+    const { getByText, queryByText } = render(
+      <TaskPicker
+        tasks={[task(1, 4)]}
+        chapters={[4]}
+        busy
+        onStart={(id) => started.push(id)}
+      />,
+    )
+
+    // The busy label replaces Start where the click was, rather than fifteen seconds
+    // of nothing happening in the corner of the screen the student is not looking at.
+    expect(queryByText('Start')).toBeNull()
+    const button = getByText('reverting...')
+    fireEvent.click(button)
+    expect(started).toEqual([])
+  })
+
+  it('shows a failed start beside the row, not at the bottom of the page', () => {
+    // `error` is the response to pressing Start, so it belongs where Start is. The
+    // old layout put it above a footer button, which is off-screen for every row
+    // except the last few.
+    const { container, getByText } = render(
+      <TaskPicker
+        tasks={[task(1, 4), task(2, 9)]}
+        chapters={[4, 9]}
+        error="the guest is not reachable"
+        onStart={() => {}}
+      />,
+    )
+
+    const list = container.querySelector('ul')
+    expect(list).not.toBeNull()
+    expect(list?.contains(getByText('the guest is not reachable'))).toBe(true)
+  })
+
+  it('still shows an error when nothing is selected, because then there is no row', () => {
+    // This is the list itself failing to load - `Lab` sets the same `error` from
+    // `api.tasks()`. With no rows, an error that only renders beside a row would
+    // leave the student on an empty screen with no explanation.
+    const { getByText } = render(<TaskPicker tasks={[]} error="corpus not loaded" onStart={() => {}} />)
+
+    expect(getByText('corpus not loaded')).toBeDefined()
   })
 })

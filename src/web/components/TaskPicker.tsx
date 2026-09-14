@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { SessionMode, TaskSummary } from '../api.ts'
 
 // Every `SessionMode` must have a card here, or the picker silently cannot offer
@@ -76,11 +76,12 @@ export function TaskPicker({ tasks, chapters = [], error, busy = false, onStart 
 
   const groups = useMemo(() => groupByChapter(tasks, chapters), [tasks, chapters])
   const empty = groups.filter((g) => g.tasks.length === 0)
+  const failed = error !== null && error !== undefined
 
   useEffect(() => {
     // The default is the first task *in chapter order*, not `tasks[0]`, so that
-    // pressing Start without choosing anything starts the earliest chapter the
-    // bank covers rather than whichever area sorts first alphabetically.
+    // starting without choosing anything begins at the earliest chapter the bank
+    // covers rather than whichever area sorts first alphabetically.
     if (selected !== null) return
     const first = groups.flatMap((g) => g.tasks)[0]
     if (first !== undefined) setSelected(first.id)
@@ -91,8 +92,8 @@ export function TaskPicker({ tasks, chapters = [], error, busy = false, onStart 
     // reason `Dashboard` and `Concepts` do it this way: `App`'s shell is
     // `overflow-hidden`, so a screen taller than the viewport has to say so itself
     // or its bottom is simply unreachable. The picker got away without it while the
-    // bank held five tasks and fit on screen; at twenty-seven the Start button and
-    // the last third of the list sat below the fold with no way to reach them.
+    // bank held five tasks and fit on screen; at twenty-seven the task list and the
+    // Start button sat below the fold with no way to reach them.
     // `h-full` bounds it against the shell, and `overflow-y-auto` goes on the
     // full-width element so the scrollbar sits at the window edge rather than down
     // the middle of the centred column.
@@ -126,6 +127,29 @@ export function TaskPicker({ tasks, chapters = [], error, busy = false, onStart 
               ` material you can skip.`
             : ''}
         </p>
+        {/*
+          This note used to sit under the Start button at the bottom of the page,
+          which is now the one place it cannot be: Start moved onto the selected row
+          and there is no bottom of the page to read any more. It says what pressing
+          Start costs, so it has to be readable before the pressing rather than
+          after.
+        */}
+        <p className="mt-1 text-xs text-zinc-500">
+          Starting reverts the lab VM to the clean snapshot and runs the task's setup. It takes
+          about fifteen seconds and discards anything left over from a previous attempt.
+        </p>
+
+        {/*
+          A failure with no selection is a failure to load the list at all - the
+          screen has no row to hang it on, so it goes here. When something *is*
+          selected the same message renders beside that row instead, because that is
+          where the click was.
+        */}
+        {failed && selected === null ? (
+          <div className="mt-4 rounded border border-rose-800 bg-rose-950/40 p-3 text-sm text-rose-200">
+            {error}
+          </div>
+        ) : null}
 
         <ul className="mt-3 divide-y divide-zinc-800 rounded border border-zinc-800">
           {groups.map((g) => (
@@ -146,53 +170,69 @@ export function TaskPicker({ tasks, chapters = [], error, busy = false, onStart 
               ) : (
                 <ul className="divide-y divide-zinc-800/60">
                   {g.tasks.map((t) => (
-                    <li key={t.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelected(t.id)}
-                        className={`flex w-full items-center gap-3 p-3 pl-6 text-left ${
+                    <Fragment key={t.id}>
+                      {/*
+                        Two siblings in one row rather than one big button, because
+                        Start has to be a button of its own and a button inside a
+                        button is invalid HTML - the browser hoists the inner one out
+                        and the click targets stop being what the markup says. So the
+                        selecting half is the button and the row carries the
+                        highlight.
+                      */}
+                      <li
+                        className={`flex items-center gap-3 pr-3 ${
                           selected === t.id ? 'bg-zinc-900' : ''
                         }`}
                       >
-                        <span className="flex-1 text-zinc-100">{t.title}</span>
-                        {t.scope === 'instrumental' ? (
-                          <span className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
-                            supporting
+                        <button
+                          type="button"
+                          onClick={() => setSelected(t.id)}
+                          className="flex min-w-0 flex-1 items-center gap-3 p-3 pl-6 text-left"
+                        >
+                          <span className="min-w-0 flex-1 text-zinc-100">{t.title}</span>
+                          {t.scope === 'instrumental' ? (
+                            <span className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
+                              supporting
+                            </span>
+                          ) : null}
+                          {t.rebootCheck ? (
+                            <span className="text-xs text-zinc-500">reboot check</span>
+                          ) : null}
+                          <span className="shrink-0 text-xs text-zinc-500">
+                            {Math.round(t.timeBudget / 60)} min
                           </span>
+                        </button>
+                        {/*
+                          Start sits on the selected row, after the duration, and
+                          nowhere else. It used to be a single button below the whole
+                          list, which was fine while the bank held five tasks and is a
+                          scroll to the bottom and back at twenty-seven - and the trip
+                          back is the worse half, because by then the screen no longer
+                          shows which task is about to run. Rendering it only for the
+                          selected row keeps the button that starts a task beside the
+                          task it starts, and keeps exactly one of them on screen.
+                        */}
+                        {selected === t.id ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => onStart(t.id, mode)}
+                            className="shrink-0 rounded bg-emerald-700 px-3 py-1 text-sm text-white disabled:opacity-40"
+                          >
+                            {busy ? 'reverting...' : 'Start'}
+                          </button>
                         ) : null}
-                        {t.rebootCheck ? (
-                          <span className="text-xs text-zinc-500">reboot check</span>
-                        ) : null}
-                        <span className="text-xs text-zinc-500">
-                          {Math.round(t.timeBudget / 60)} min
-                        </span>
-                      </button>
-                    </li>
+                      </li>
+                      {failed && selected === t.id ? (
+                        <li className="bg-rose-950/40 px-6 py-2 text-sm text-rose-200">{error}</li>
+                      ) : null}
+                    </Fragment>
                   ))}
                 </ul>
               )}
             </li>
           ))}
         </ul>
-
-        {error !== null && error !== undefined ? (
-          <div className="mt-4 rounded border border-rose-800 bg-rose-950/40 p-3 text-sm text-rose-200">
-            {error}
-          </div>
-        ) : null}
-
-        <button
-          type="button"
-          disabled={selected === null || busy}
-          onClick={() => selected !== null && onStart(selected, mode)}
-          className="mt-6 rounded bg-emerald-700 px-4 py-2 text-white disabled:opacity-40"
-        >
-          {busy ? 'reverting the snapshot...' : 'Start'}
-        </button>
-        <p className="mt-2 text-xs text-zinc-500">
-          Starting reverts the lab VM to the clean snapshot and runs the task's setup. It takes
-          about fifteen seconds and discards anything left over from a previous attempt.
-        </p>
       </div>
     </div>
   )
