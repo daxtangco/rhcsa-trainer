@@ -51,7 +51,10 @@ export function Learn({ api }: LearnProps) {
   useEffect(() => {
     api
       .tasks()
-      .then(setTasks)
+      // This screen wants the tasks and not the book's chapter list: what it
+      // groups by is the objective, and a chapter with no task has no objective
+      // to teach here.
+      .then((v) => setTasks(v.tasks))
       .catch((e: unknown) => setTasksError(message(e)))
   }, [api])
 

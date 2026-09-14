@@ -66,7 +66,10 @@ const SESSION: StartedSession = {
 
 const fake = {
   health: vi.fn(async () => ({ ok: true, transport: 'ssh' as const, tasks: 1 })),
-  tasks: vi.fn(async (): Promise<TaskSummary[]> => [TASK]),
+  tasks: vi.fn(async (): Promise<{ tasks: TaskSummary[]; chapters: number[] }> => ({
+    tasks: [TASK],
+    chapters: [15],
+  })),
   task: vi.fn(async () => ({ id: TASK_ID, title: TITLE, concepts: [] })),
   concept: vi.fn(async () => ({ id: 'lvm.extend', title: 'Extending a logical volume', body: 'b' })),
   overview: vi.fn(async () => ({

@@ -62,7 +62,13 @@ let mode: SessionMode = 'practice'
 
 const fake = {
   health: vi.fn(async () => ({ ok: true, transport: 'ssh' as const, tasks: 1 })),
-  tasks: vi.fn(async (): Promise<TaskSummary[]> => [TASK]),
+  // `chapters` is the book's chapter list, not the bank's; one task in chapter 15
+  // and a book that also has 16 is the smallest shape that keeps the picker's
+  // backlog row exercised through the whole app rather than only in its own test.
+  tasks: vi.fn(async (): Promise<{ tasks: TaskSummary[]; chapters: number[] }> => ({
+    tasks: [TASK],
+    chapters: [15, 16],
+  })),
   task: vi.fn(async () => ({ id: TASK_ID, title: TITLE, concepts: [] })),
   concept: vi.fn(async () => ({ id: 'lvm-extend', title: 'Extending a logical volume', body: 'b' })),
   start: vi.fn(async (taskId: string, m: SessionMode): Promise<StartedSession> => {

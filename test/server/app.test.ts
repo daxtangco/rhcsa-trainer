@@ -298,6 +298,20 @@ describe('GET /api/tasks', () => {
     // The list is for choosing; the prompt belongs to a session.
     expectMissing(body, 'tasks', 0, 'prompt')
   })
+
+  it('reports an empty chapter list when no corpus is loaded, rather than omitting it', async () => {
+    // `corpus` is optional on `AppDeps` and this harness passes none. The field
+    // still has to be present and an array, because the picker's fallback is
+    // "group by the chapters the tasks name" and `undefined` would make it read a
+    // missing key instead - and because a *guessed* 1..28 range would show
+    // twenty-eight chapters of backlog on a server that simply has no book
+    // extracted. The populated case is measured against the real corpus in
+    // `test/server/guided-routes.test.ts`.
+    const { a } = app()
+    const res = await a.request('/api/tasks')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ chapters: [] })
+  })
 })
 
 describe('GET /api/tasks/:area/:slug', () => {

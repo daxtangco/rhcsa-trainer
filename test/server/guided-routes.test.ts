@@ -166,3 +166,30 @@ describe('GET /api/guided/objective/:id', () => {
     expect((await app()(`/api/guided/objective/${first}`)).status).toBe(200)
   })
 })
+
+/**
+ * Not a guided route, but this is the only server test file that loads the real
+ * corpus, and `chapters` is a fact about the corpus. `test/server/app.test.ts`
+ * covers the other side — the empty list a server with no corpus returns.
+ */
+describe('GET /api/tasks chapters', () => {
+  it('lists the book chapters, ascending, including ones the bank has no task for', async () => {
+    const res = await app()('/api/tasks')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { tasks: Array<{ chapter: number }>; chapters: number[] }
+
+    // Ascending and deduplicated: the corpus has hundreds of items across these
+    // chapters, and the picker groups on this list in the order it arrives.
+    expect(body.chapters.length).toBeGreaterThan(0)
+    expect([...body.chapters].sort((a, b) => a - b)).toEqual(body.chapters)
+    expect(new Set(body.chapters).size).toBe(body.chapters.length)
+
+    // The claim that makes the field worth returning: it is a *superset* of the
+    // chapters the tasks cover, and strictly larger. If it were merely equal, the
+    // picker could derive it from the task list and the authoring backlog would be
+    // invisible - which is the bug this field exists to prevent.
+    const covered = new Set(body.tasks.map((t) => t.chapter))
+    for (const c of covered) expect(body.chapters, `chapter ${c}`).toContain(c)
+    expect(body.chapters.filter((c) => !covered.has(c)).length).toBeGreaterThan(0)
+  })
+})

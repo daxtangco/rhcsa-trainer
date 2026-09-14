@@ -39,10 +39,20 @@ describe('createApi', () => {
     expect(typeof globalThis.window).toBe('undefined')
   })
 
-  it('lists tasks', async () => {
-    const { impl } = fakeFetch(() => [200, { tasks: [{ id: 'storage/014-grow-home-lv' }] }])
+  it('lists tasks with the book chapter list beside them', async () => {
+    // The whole body, not `.tasks`: `chapters` is the book's chapter list and the
+    // difference between it and the chapters the tasks cover is the authoring
+    // backlog the picker renders. Unwrapping to the array here would have hidden
+    // the field from every caller.
+    const { impl } = fakeFetch(() => [
+      200,
+      { tasks: [{ id: 'storage/014-grow-home-lv' }], chapters: [14, 15] },
+    ])
     const api = createApi(impl)
-    expect(await api.tasks()).toEqual([{ id: 'storage/014-grow-home-lv' }])
+    expect(await api.tasks()).toEqual({
+      tasks: [{ id: 'storage/014-grow-home-lv' }],
+      chapters: [14, 15],
+    })
   })
 
   it('starts a session with a JSON body', async () => {

@@ -41,6 +41,19 @@ export interface TaskSummary {
   objectives: string[]
 }
 
+/**
+ * What `GET /api/tasks` returns. `chapters` is every chapter the *book* has, which
+ * is a strictly larger set than the chapters `tasks` covers — that difference is
+ * the authoring backlog, and it is the reason this route returns an object rather
+ * than the bare array it used to. It is `[]` when the server has no corpus loaded,
+ * and a caller that gets `[]` must not substitute a guessed range: it knows the
+ * chapters it has tasks for and nothing else.
+ */
+export interface TaskListView {
+  tasks: TaskSummary[]
+  chapters: number[]
+}
+
 export interface StartedSession {
   id: string
   taskId: string
@@ -340,9 +353,14 @@ export function createApi(fetchImpl: typeof fetch = fetch) {
   return {
     /** `transport` here is the **server's** live transport, not any task's. */
     health: () => call<{ ok: boolean; transport: 'ssh' | 'vmrun'; tasks: number }>('/api/health'),
-    async tasks(): Promise<TaskSummary[]> {
-      return (await call<{ tasks: TaskSummary[] }>('/api/tasks')).tasks
-    },
+    /**
+     * The whole list plus the book's chapter list. This used to unwrap to
+     * `TaskSummary[]`; it stopped when the picker needed to show the chapters that
+     * have no task, because that fact is not in the tasks. Callers that only want
+     * the array take `.tasks` at the call site rather than getting a second method
+     * for the same route.
+     */
+    tasks: () => call<TaskListView>('/api/tasks'),
     // The id already contains the slash the route needs, so it must not be
     // percent-encoded.
     task: (id: string) => call<TaskDetail>(`/api/tasks/${id}`),

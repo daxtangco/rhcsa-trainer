@@ -138,6 +138,23 @@ function summary(t: TaskSpec) {
   }
 }
 
+/**
+ * Every chapter the book corpus knows about, ascending, so a client can show the
+ * chapters that have **no** task yet. That list cannot be derived from the task
+ * list: the tasks only know the chapters somebody already authored for, and the
+ * gap at the end is the half worth seeing.
+ *
+ * Empty when the corpus is not loaded — `corpus` is optional on `AppDeps` and the
+ * `/api/guided/*` routes already 500 without it. A picker asked to render an empty
+ * list should fall back to grouping only the chapters it has tasks for rather than
+ * inventing a 1..28 range, because "the corpus is absent" and "chapter 12 has no
+ * task" are different facts and only one of them is a backlog.
+ */
+function chapterList(corpus?: Corpus): number[] {
+  if (corpus === undefined) return []
+  return [...new Set(corpus.items.map((i) => i.chapter))].sort((a, b) => a - b)
+}
+
 function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -301,7 +318,14 @@ export function createApp(deps: AppDeps): Hono {
     c.json({ ok: true, transport: deps.runtime.transportKind, tasks: deps.bank.tasks.length }),
   )
 
-  app.get('/api/tasks', (c) => c.json({ tasks: deps.bank.tasks.map(summary) }))
+  // `chapters` is what the *book* has, not what the bank has, which is the only
+  // way the picker can show a chapter with no task yet. Deriving it client-side
+  // from the tasks would make the authoring backlog exactly as incomplete as the
+  // bank: the gap at the end — the chapters nothing has reached — is the half worth
+  // seeing, and it is invisible from the task list alone.
+  app.get('/api/tasks', (c) =>
+    c.json({ tasks: deps.bank.tasks.map(summary), chapters: chapterList(deps.corpus) }),
+  )
 
   // Task ids contain a slash, so they arrive as two path segments.
   app.get('/api/tasks/:area/:slug', async (c) => {

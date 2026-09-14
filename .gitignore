@@ -9,3 +9,9 @@ dist/
 coverage/
 .omc/
 .validate-logs/
+# The attempt store's own directory. `*.db` above already covers `history.db`, but
+# not SQLite's `-wal` and `-shm` companions, which appear the moment the server
+# runs and are the same data mid-flight.
+.rhcsa/
+# Editor scratch. A `.swp` next to a doc means somebody is writing in it right now.
+*.swp

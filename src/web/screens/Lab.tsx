@@ -41,6 +41,10 @@ export interface LabProps {
 
 export function Lab({ api, active }: LabProps) {
   const [tasks, setTasks] = useState<TaskSummary[]>([])
+  // The book's chapters, not the bank's. `[]` is the honest value when the server
+  // has no corpus loaded, and the picker treats it as "group by the chapters you
+  // have" rather than as "no chapters exist".
+  const [chapters, setChapters] = useState<number[]>([])
   const [serverTransport, setServerTransport] = useState<'ssh' | 'vmrun'>()
   const [session, setSession] = useState<StartedSession>()
   const [concepts, setConcepts] = useState<ConceptRef[]>([])
@@ -65,7 +69,10 @@ export function Lab({ api, active }: LabProps) {
   useEffect(() => {
     api
       .tasks()
-      .then(setTasks)
+      .then((v) => {
+        setTasks(v.tasks)
+        setChapters(v.chapters)
+      })
       .catch((e: unknown) => setError(message(e)))
     api
       .health()
@@ -265,7 +272,15 @@ export function Lab({ api, active }: LabProps) {
   }, [active, session, finished, doHint, doGrade, doFinish])
 
   if (session === undefined) {
-    return <TaskPicker tasks={tasks} error={error} busy={starting} onStart={start} />
+    return (
+      <TaskPicker
+        tasks={tasks}
+        chapters={chapters}
+        error={error}
+        busy={starting}
+        onStart={start}
+      />
+    )
   }
 
   // `rating === null` is ambiguous on its own: the server answers it both when
